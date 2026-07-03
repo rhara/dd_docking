@@ -2,6 +2,8 @@
 name = "dockinglib"
 version = "0.1.0"
 description = "Ensemble docking toolkit with flexible-side-chain sampling and MD-based induced-fit rescoring"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["rdkit", "numpy", "pandas"]
 

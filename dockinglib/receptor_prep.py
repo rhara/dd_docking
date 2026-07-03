@@ -2,13 +2,12 @@
 downstream tools, and fix missing atoms with PDBFixer.
 
 Heavy dependencies (openmm, pdbfixer) are imported lazily inside functions
-so this module stays importable without the `mpro` conda env.
+so this module stays importable without those installed.
 
-Adapted from `.archives/a2a-vs/vslib/docking.py`. Hydrogens are
-deliberately NOT added here: Meeko's `mk_prepare_receptor.py` does its own
-protonation/charge assignment during PDBQT conversion (see `ensemble.py`),
-and pre-adding hydrogens with PDBFixer has caused clashes with that step
-in the earlier `a2a-vs` project.
+Hydrogens are deliberately NOT added here: Meeko's `mk_prepare_receptor.py`
+does its own protonation/charge assignment during PDBQT conversion (see
+`ensemble.py`), and pre-adding hydrogens with PDBFixer has been observed to
+clash with that step.
 """
 from __future__ import annotations
 
@@ -20,7 +19,23 @@ RCSB_PDB = "https://files.rcsb.org/download/{pdb}.pdb"
 
 
 def download_pdb(pdb_id: str, dest: Path) -> str:
-    """Fetch a PDB entry from RCSB (cached: skips download if `dest` exists)."""
+    """Fetch a raw PDB entry from RCSB and return its text contents.
+
+    Convenience utility for users who want a co-crystal structure straight
+    from RCSB before running it through `prepare_receptor_pdb`. Not used
+    internally elsewhere in this package (`prepare_receptor_pdb` and
+    friends take an already-downloaded PDB path), but kept as public API
+    for callers doing their own PDB fetching.
+
+    Args:
+        pdb_id: 4-character RCSB PDB accession code (e.g. "6W63").
+        dest: Local file path to save the downloaded PDB to. If this path
+            already exists, the download is skipped and the cached file's
+            text is returned instead (simple on-disk cache).
+
+    Returns:
+        The full text contents of the (possibly cached) PDB file.
+    """
     dest = Path(dest)
     if not dest.exists():
         urllib.request.urlretrieve(RCSB_PDB.format(pdb=pdb_id), dest)
@@ -146,7 +161,7 @@ def prepare_receptor_pdb(raw_pdb: Path, out_pdb: Path, *, chain: str = "A",
     text = raw_pdb.read_text()
     receptor_lines, ligand_lines = split_receptor(text, chain, lig_resname, drop_resseq_above)
     if not receptor_lines:
-        raise ValueError(f"{raw_pdb}: chain {chain!r} に ATOM 行が見つかりません")
+        raise ValueError(f"{raw_pdb}: no ATOM lines found for chain {chain!r}")
 
     tidied = tmp_dir / f"{out_pdb.stem}_tidy.pdb"
     n_ss = tidy_receptor(receptor_lines, tidied)

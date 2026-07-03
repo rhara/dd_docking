@@ -2,8 +2,7 @@
 member (receptor conformation) and rank ligands by their best-of-ensemble
 affinity.
 
-New orchestration logic (no equivalent exists in any archived project) --
-shape mirrors `rocslib/screening.py`'s "run N items, keep the best, rank"
+Shape mirrors `rocslib/screening.py`'s "run N items, keep the best, rank"
 pattern, but here "N" is ensemble members per ligand rather than conformers
 per molecule. Parallelizes over the flat (ligand, member) task grid (each
 task independently docks one ligand into one member's grid maps), matching
@@ -13,7 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import docking, io, ligand_prep
 from .ensemble import EnsembleMember
@@ -38,7 +37,7 @@ def rank_key(hit: EnsembleHit):
     return (hit.best_affinity is None, hit.best_affinity)
 
 
-def _dock_task(task) -> tuple:
+def _dock_task(task) -> Tuple[str, str, Optional[float], Optional[str]]:
     ligand_id, smiles, member, exhaustiveness, n_poses, seed, cpu = task
     pdbqt = ligand_prep.prepare_ligand_pdbqt(smiles, seed=seed)
     if pdbqt is None:
@@ -78,13 +77,13 @@ def screen_ensemble(
     heavy enough per task (each flexible residue adds real search
     dimensions -- see `pocket.find_pocket_residues`) that Vina's own
     internal multi-threading matters a lot; unlike cheap rigid-receptor
-    docking (where `.archives/mpro/.archives/vspipe/dock.py` pins every job
-    to 1 CPU and relies purely on process-level parallelism), pinning every
-    worker to 1 CPU here was measured to be ~5x slower per task than
-    letting it use several cores.
+    docking pipelines (which typically pin every job to 1 CPU and rely
+    purely on process-level parallelism), pinning every worker to 1 CPU
+    here was measured to be ~5x slower per task than letting it use
+    several cores.
     """
     if not ensemble:
-        raise ValueError("screen_ensemble: ensemble が空です")
+        raise ValueError("screen_ensemble: ensemble is empty")
 
     if n_jobs == 1:
         cpu_per_task = 0

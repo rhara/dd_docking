@@ -2,11 +2,10 @@
 flexible-side-chain-ready PDBQT receptors ("ensemble members"), each with
 its own docking box and pocket flexible-residue selection.
 
-`receptor_to_pdbqt` is adapted from `.archives/a2a-vs/vslib/docking.py`'s
-`receptor_to_pdbqt()`, extended with the `-f FLEXRES` argument (confirmed
-supported by the installed `mk_prepare_receptor.py`, which emits
-`<basename>_rigid.pdbqt` + `<basename>_flex.pdbqt` when flexible residues
-are given, or plain `<basename>.pdbqt` when none are).
+`receptor_to_pdbqt` uses the `-f FLEXRES` argument supported by
+`mk_prepare_receptor.py`, which emits `<basename>_rigid.pdbqt` +
+`<basename>_flex.pdbqt` when flexible residues are given, or plain
+`<basename>.pdbqt` when none are.
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ import json
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from . import pocket, receptor_prep
 
@@ -32,7 +31,7 @@ class EnsembleMember:
 
 def receptor_to_pdbqt(fixed_pdb: Path, center: Sequence[float], size: Sequence[float],
                       out_basename: Path, *, flexres: str = "",
-                      charge_model: str = "gasteiger") -> tuple[Path, Optional[Path]]:
+                      charge_model: str = "gasteiger") -> Tuple[Path, Optional[Path]]:
     """Run Meeko's `mk_prepare_receptor.py` to produce a Vina-ready PDBQT
     receptor (and, if `flexres` is non-empty, a separate rigid/flex pair)
     plus the docking box. Returns (rigid_pdbqt, flex_pdbqt_or_None)."""
@@ -44,7 +43,7 @@ def receptor_to_pdbqt(fixed_pdb: Path, center: Sequence[float], size: Sequence[f
         cmd += ["-f", flexres]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError("mk_prepare_receptor 失敗:\n" + r.stdout[-1500:] + r.stderr[-1500:])
+        raise RuntimeError("mk_prepare_receptor failed:\n" + r.stdout[-1500:] + r.stderr[-1500:])
 
     if flexres:
         rigid = out_basename.with_name(out_basename.name + "_rigid.pdbqt")
@@ -71,8 +70,8 @@ def prepare_ensemble_member(raw_pdb: Path, member_id: str, out_dir: Path, *,
     )
     if not ligand_lines:
         raise ValueError(
-            f"{member_id}: 共結晶リガンド ({lig_resname!r}) が見つからず、"
-            "ボックス/ポケット残基を決められません"
+            f"{member_id}: co-crystal ligand ({lig_resname!r}) not found, "
+            "cannot determine the docking box/pocket residues"
         )
 
     center, size = pocket.compute_box(ligand_lines, padding=box_padding)
@@ -96,7 +95,7 @@ def prepare_ensemble_member(raw_pdb: Path, member_id: str, out_dir: Path, *,
     )
 
 
-def prepare_ensemble(members: Sequence[tuple[str, Path, str]], out_dir: Path, *,
+def prepare_ensemble(members: Sequence[Tuple[str, Path, str]], out_dir: Path, *,
                      chain: str = "A", pocket_cutoff: float = 5.0, max_flexres: Optional[int] = 10,
                      box_padding: float = 5.0, charge_model: str = "gasteiger") -> List[EnsembleMember]:
     """`members` is a sequence of (member_id, raw_pdb_path, lig_resname) --

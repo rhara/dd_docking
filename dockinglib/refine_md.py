@@ -2,16 +2,14 @@
 OpenMM MD for only the top-ranked docking hits, to see whether a pose (and
 the pocket around it) stays put once the receptor is allowed to move.
 
-Adapted from the CPU-friendly implicit-solvent variant in
-`.archives/mpro/.archives/vspipe/md.py` (`_protonate_protein`,
-`_build_simulation`, `_run_one_md`, `_ligand_rmsd_series`) -- not the full
-explicit-solvent `step7_md.py`, which is overkill for rescoring a shortlist.
-Heavy deps (openmm, openff, mdtraj, meeko) are imported lazily.
+Uses a CPU-friendly implicit-solvent setup rather than full explicit-solvent
+MD, which would be overkill for rescoring a shortlist. Heavy deps (openmm,
+openff, mdtraj, meeko) are imported lazily.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -34,7 +32,7 @@ def _protonate_protein(protein_raw: Path, out_pdb: Path, ph: float = 7.4) -> Non
         PDBFile.writeFile(fixer.topology, fixer.positions, fh)
 
 
-def _ligand_from_pose(pose_pdbqt: Path):
+def _ligand_from_pose(pose_pdbqt: Path) -> Tuple[Any, Any]:
     """Load a docked pose PDBQT as an OpenFF Molecule (with Gasteiger
     partial charges) plus its RDKit Mol."""
     from meeko import PDBQTMolecule, RDKitMolCreate
@@ -55,7 +53,13 @@ def _ligand_from_pose(pose_pdbqt: Path):
 
 
 def _build_simulation(protein_pdb: Path, off_lig, implicit: bool,
-                      temperature_k: float, timestep_fs: float):
+                      temperature_k: float, timestep_fs: float) -> Tuple[Any, Any]:
+    """Build an OpenMM `Simulation` (CPU platform, Langevin middle
+    integrator) for the given protein PDB + OpenFF ligand molecule.
+
+    Returns (simulation, modeller). `modeller` holds the combined
+    protein+ligand topology/positions used to write out the complex PDB.
+    """
     from openmm import LangevinMiddleIntegrator, Platform, app, unit
     from openmm.app import Modeller, PDBFile
     from openmmforcefields.generators import SystemGenerator
@@ -82,6 +86,31 @@ def _build_simulation(protein_pdb: Path, off_lig, implicit: bool,
     return sim, modeller
 
 
+def _summarize_rmsd(rmsd: Any, *, stable_mean_cutoff: float = 3.0,
+                    stable_final_cutoff: float = 4.0) -> Dict[str, Any]:
+    """Reduce a per-frame ligand heavy-atom RMSD series (Angstrom, as
+    returned by `_ligand_rmsd_series`) to summary statistics plus a
+    "stable" pose classification.
+
+    A pose is classified as "stable" when its mean RMSD over the whole
+    trajectory is below `stable_mean_cutoff` AND its RMSD in the final
+    frame is below `stable_final_cutoff` -- i.e. it neither drifted a lot
+    on average nor ended up far from its starting pose.
+
+    Pure numeric logic, no OpenMM/mdtraj calls -- split out from
+    `refine_one_hit` so it can be unit-tested without a real MD run.
+    """
+    import numpy as np
+
+    return {
+        "n_frames": int(len(rmsd)),
+        "rmsd_mean": round(float(np.mean(rmsd)), 2),
+        "rmsd_final": round(float(rmsd[-1]), 2),
+        "rmsd_max": round(float(np.max(rmsd)), 2),
+        "stable": bool(np.mean(rmsd) < stable_mean_cutoff and rmsd[-1] < stable_final_cutoff),
+    }
+
+
 def _ligand_rmsd_series(top_pdb: Path, dcd: Path):
     """Ligand heavy-atom RMSD (frame-0 reference) after protein-CA
     superposition, in Angstrom."""
@@ -102,10 +131,38 @@ def _ligand_rmsd_series(top_pdb: Path, dcd: Path):
 def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path, *,
                    implicit: bool = True, temperature_k: float = 300.0,
                    timestep_fs: float = 4.0, equil_ps: float = 20.0,
-                   prod_ps: float = 100.0, report_ps: float = 2.0) -> dict:
+                   prod_ps: float = 100.0, report_ps: float = 2.0) -> Dict[str, Any]:
     """Minimize -> equilibrate -> run a short production MD for one
-    protein+pose complex, and summarize ligand pose stability."""
-    import numpy as np
+    protein+pose complex, and summarize ligand pose stability.
+
+    Args:
+        name: Identifier for this hit (used for logging and the returned
+            record's "name" field; typically the ligand id).
+        pose_pdbqt: Path to the docked pose PDBQT (single best pose) to
+            load as the ligand.
+        protein_pdb: Path to the (already protonated) receptor PDB to
+            build the complex with.
+        workdir: Directory to write intermediate/output files to
+            (`complex.pdb`, `prod.dcd`); created if missing.
+        implicit: If True, use GBn2 implicit solvent; if the system build
+            fails with implicit solvent, automatically retries once in
+            vacuum (the returned record's "implicit" field reflects what
+            was actually used).
+        temperature_k: Simulation temperature, in kelvin.
+        timestep_fs: Integrator timestep, in femtoseconds.
+        equil_ps: Equilibration run length, in picoseconds.
+        prod_ps: Production run length, in picoseconds.
+        report_ps: Trajectory frame-writing interval during production, in
+            picoseconds.
+
+    Returns:
+        A dict record with keys: "name", "status" ("ok" or "fail"),
+        "implicit" (bool, solvent model actually used), "n_frames" (int),
+        "rmsd_mean"/"rmsd_final"/"rmsd_max" (ligand heavy-atom RMSD in
+        Angstrom), "stable" (bool, rmsd_mean < 3.0 and rmsd_final < 4.0),
+        and "e_min_kcal"/"e_final_kcal" (potential energy in kcal/mol
+        before minimization and after production, respectively).
+    """
     from openmm import app, unit
 
     workdir = Path(workdir)
@@ -117,7 +174,7 @@ def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path
     try:
         sim, modeller = _build_simulation(protein_pdb, off_lig, implicit, temperature_k, timestep_fs)
     except Exception as e:  # noqa: BLE001
-        print(f"[MD {name}] implicit solvent 系の構築失敗、真空で再試行: {e}", flush=True)
+        print(f"[MD {name}] implicit solvent system build failed, retrying in vacuum: {e}", flush=True)
         implicit = False
         sim, modeller = _build_simulation(protein_pdb, off_lig, False, temperature_k, timestep_fs)
     rec["implicit"] = implicit
@@ -142,13 +199,8 @@ def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path
     e_final = sim.context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilocalorie_per_mole)
 
     rmsd = _ligand_rmsd_series(top_pdb, dcd)
+    rec.update({"status": "ok", **_summarize_rmsd(rmsd)})
     rec.update({
-        "status": "ok",
-        "n_frames": int(len(rmsd)),
-        "rmsd_mean": round(float(np.mean(rmsd)), 2),
-        "rmsd_final": round(float(rmsd[-1]), 2),
-        "rmsd_max": round(float(np.max(rmsd)), 2),
-        "stable": bool(np.mean(rmsd) < 3.0 and rmsd[-1] < 4.0),
         "e_min_kcal": round(float(e_min), 1),
         "e_final_kcal": round(float(e_final), 1),
     })
@@ -164,6 +216,30 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
     `receptor_pdb` columns) and MD-refine/rescore its top `top_n` hits.
     Writes and returns `md_rescore.csv`: Vina affinity re-ranked by
     (stable first, then affinity ascending).
+
+    Args:
+        ranked_csv: Path to the ranked results CSV produced by
+            `screening.write_results_csv` (needs `ligand_id`,
+            `best_affinity`, `pose_pdbqt`, and `receptor_pdb` columns).
+        out_dir: Output directory for per-hit MD workdirs, protonated
+            receptor PDBs, and the final `md_rescore.csv`.
+        top_n: Number of top-ranked rows (by input CSV order) to refine.
+        implicit: If True, use GBn2 implicit solvent for each hit (falls
+            back to vacuum per-hit if the implicit system build fails);
+            if False, always run in vacuum.
+        temperature_k: Simulation temperature, in kelvin.
+        timestep_fs: Integrator timestep, in femtoseconds.
+        equil_ps: Equilibration run length per hit, in picoseconds.
+        prod_ps: Production run length per hit, in picoseconds.
+        report_ps: Trajectory frame-writing interval during production,
+            in picoseconds.
+        show_progress: If True, print a progress line per completed hit.
+
+    Returns:
+        The results DataFrame (also written to `out_dir/md_rescore.csv`),
+        with one row per hit including `best_affinity` and, when the MD
+        run succeeded, the stability/RMSD/energy fields documented in
+        `refine_one_hit`.
     """
     import re
 
@@ -173,9 +249,9 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
     df = pd.read_csv(ranked_csv)
     df = df[df["pose_pdbqt"].notna() & df["receptor_pdb"].notna()].head(top_n)
     if df.empty:
-        raise ValueError(f"{ranked_csv}: pose_pdbqt/receptor_pdb 列が空です")
+        raise ValueError(f"{ranked_csv}: pose_pdbqt/receptor_pdb columns are empty")
 
-    protonated_by_receptor: dict[str, Path] = {}
+    protonated_by_receptor: Dict[str, Path] = {}
     progress = RefineProgress(enabled=show_progress)
     safe_re = re.compile(r"[^A-Za-z0-9._-]+")
     results = []
