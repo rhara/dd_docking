@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dockinglib.refine_md import _summarize_rmsd
+from dd_docking.refine_md import _summarize_rmsd
 
 
 def test_summarize_rmsd_stable_when_low_and_flat():

@@ -1,4 +1,4 @@
-from dockinglib.receptor_prep import split_receptor, tidy_receptor
+from dd_docking.receptor_prep import split_receptor, tidy_receptor
 
 
 def _atom_line(serial, name, resname, chain, resnum, x, y, z, *, altloc=" ",

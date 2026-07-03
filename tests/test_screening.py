@@ -1,4 +1,4 @@
-from dockinglib.screening import EnsembleHit, rank_key, write_results_csv
+from dd_docking.screening import EnsembleHit, rank_key, write_results_csv
 
 
 def _hit(ligand_id, best_affinity, best_member="m1"):

@@ -212,7 +212,7 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
                     timestep_fs: float = 4.0, equil_ps: float = 20.0,
                     prod_ps: float = 100.0, report_ps: float = 2.0,
                     show_progress: bool = True) -> pd.DataFrame:
-    """Read a `dockinglib-dock` ranked CSV (must have `pose_pdbqt` and
+    """Read a `dd_docking-dock` ranked CSV (must have `pose_pdbqt` and
     `receptor_pdb` columns) and MD-refine/rescore its top `top_n` hits.
     Writes and returns `md_rescore.csv`: Vina affinity re-ranked by
     (stable first, then affinity ascending).

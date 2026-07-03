@@ -1,17 +1,17 @@
-# docking
+# dd_docking
 
 An ensemble docking toolkit with induced-fit-style pocket dynamics for
 virtual screening. Designed as a reusable package, not tied to any specific
-target or ligand set (same philosophy as `overlay` / `embody` / `viewer`).
+target or ligand set (same philosophy as `dd_overlay` / `dd_confgen` / `dd_viewer`).
 
-- **Ensemble preparation (`dockinglib-prep`)**: structurally repairs multiple
+- **Ensemble preparation (`dd_docking-prep`)**: structurally repairs multiple
   receptor conformations (PDB) with PDBFixer, determines the docking box and
   pocket-proximal flexible residues from each co-crystallized ligand, and
   generates rigid/flex PDBQT pairs with Meeko.
-- **Ensemble docking (`dockinglib-dock`)**: docks each molecule in a `.smi`
+- **Ensemble docking (`dd_docking-dock`)**: docks each molecule in a `.smi`
   library against every ensemble member with flexible side chains, ranking
   by the best (lowest) affinity across members (best-of-ensemble).
-- **MD-based refinement (`dockinglib-refine`)**: relaxes top hits only with a
+- **MD-based refinement (`dd_docking-refine`)**: relaxes top hits only with a
   short implicit-solvent MD run (OpenMM, GBn2 + hydrogen mass repartitioning)
   and re-ranks them by whether the ligand heavy-atom RMSD trajectory stays in
   the pocket — a lightweight induced-fit sanity check.
@@ -22,19 +22,19 @@ Requires vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit,
 and mdtraj. These are best installed via conda-forge:
 
 ```bash
-conda create -n docking-env python=3.10 -c conda-forge \
+conda create -n dd_docking-env python=3.10 -c conda-forge \
     rdkit numpy pandas vina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
-conda activate docking-env
-cd docking
+conda activate dd_docking-env
+cd dd_docking
 pip install -e .
 ```
 
-This installs three console commands: `dockinglib-prep`, `dockinglib-dock`,
-`dockinglib-refine`.
+This installs three console commands: `dd_docking-prep`, `dd_docking-dock`,
+`dd_docking-refine`.
 
 ## Usage
 
-### 1. Ensemble preparation (`dockinglib-prep`)
+### 1. Ensemble preparation (`dd_docking-prep`)
 
 Pass `--member ID PDB_FILE COCRYSTAL_LIGAND_CODE` once per receptor
 conformation. Each member is repaired independently with PDBFixer, and the
@@ -42,7 +42,7 @@ docking box plus pocket residues (default cutoff 5 Å) are derived from the
 co-crystallized ligand's coordinates.
 
 ```bash
-dockinglib-prep \
+dd_docking-prep \
   --member 6w63 data/raw/6W63.pdb X77 \
   --member 7l11 data/raw/7L11.pdb XF1 \
   --member 7l10 data/raw/7L10.pdb XEY \
@@ -86,7 +86,7 @@ widening the cutoff to "be safe" runs into this trap easily.
 Python API:
 
 ```python
-from dockinglib import prepare_ensemble
+from dd_docking import prepare_ensemble
 
 ensemble = prepare_ensemble(
     [("6w63", "data/raw/6W63.pdb", "X77"),
@@ -98,13 +98,13 @@ for m in ensemble:
     print(m.member_id, len(m.flexres), m.rigid_pdbqt)
 ```
 
-### 2. Ensemble docking (`dockinglib-dock`)
+### 2. Ensemble docking (`dd_docking-dock`)
 
 Docks a `.smi` library (`SMILES<TAB>ID` format, one molecule per line)
 against every member of a prepared ensemble.
 
 ```bash
-dockinglib-dock data/ensemble data/ligands.smi \
+dd_docking-dock data/ensemble data/ligands.smi \
   -o data/screen --exhaustiveness 4 --n-poses 1 --n-jobs 4
 ```
 
@@ -153,14 +153,14 @@ Output:
 - `data/screen/ranked_results.csv` — columns `rank, ligand_id, smiles,
   best_member, best_affinity, receptor_pdb, pose_pdbqt,
   affinity[<member_id>]...`. `receptor_pdb` / `pose_pdbqt` are consumed
-  directly by `dockinglib-refine`.
+  directly by `dd_docking-refine`.
 - `data/screen/top_hits.sdf` — each hit's best pose, with an `affinity`
   property. **This property name is auto-recognized as a score by the
-  companion protein-ligand viewer (`rhara/viewer`, `plviewerlib`)**, so this
+  companion protein-ligand viewer (`rhara/dd_viewer`, `dd_viewer`)**, so this
   file can be loaded directly into the viewer together with the receptor PDB
   (the `receptor_pdb` column of `ranked_results.csv`).
 - `data/screen/ranked_results_poses/` — one PDBQT file per hit (input for
-  `dockinglib-refine`).
+  `dd_docking-refine`).
 
 Key options:
 
@@ -188,8 +188,8 @@ share and can also slow things down, so start conservatively (roughly 1/4 to
 Python API:
 
 ```python
-from dockinglib import ligand_prep, screen_ensemble
-from dockinglib.ensemble import load_manifest
+from dd_docking import ligand_prep, screen_ensemble
+from dd_docking.ensemble import load_manifest
 
 ensemble = load_manifest("data/ensemble/manifest.json")
 ligands = ligand_prep.read_smi("data/ligands.smi")
@@ -200,15 +200,15 @@ for hit in hits[:5]:
     print(hit.ligand_id, hit.best_member, hit.best_affinity, hit.member_affinities)
 ```
 
-### 3. MD refinement and re-ranking (`dockinglib-refine`)
+### 3. MD refinement and re-ranking (`dd_docking-refine`)
 
-Relaxes and re-evaluates only the top hits from `dockinglib-dock`'s
+Relaxes and re-evaluates only the top hits from `dd_docking-dock`'s
 `ranked_results.csv`, using a short implicit-solvent MD run (GBn2 + hydrogen
 mass repartitioning, 4 fs). Limiting this to the top N hits (rather than all
 of them) keeps the computational cost practical.
 
 ```bash
-dockinglib-refine data/screen/ranked_results.csv \
+dd_docking-refine data/screen/ranked_results.csv \
   -o data/screen/refine --top-n 2 --prod-ps 20 --equil-ps 5
 ```
 
@@ -249,7 +249,7 @@ Key options:
 Python API:
 
 ```python
-from dockinglib import refine_top_hits
+from dd_docking import refine_top_hits
 
 result = refine_top_hits("data/screen/ranked_results.csv", "data/screen/refine",
                          top_n=3, prod_ps=100.0)
@@ -262,7 +262,7 @@ To run all three steps together (each is also callable individually as
 shown above):
 
 ```python
-from dockinglib.pipeline import run_ensemble_docking
+from dd_docking.pipeline import run_ensemble_docking
 
 df = run_ensemble_docking(
     "data/ensemble", "data/ligands.smi", "data/screen",
@@ -280,7 +280,7 @@ df = run_ensemble_docking(
 - Self-docking each member's co-crystallized ligand discriminates it from
   unrelated molecules (approved drugs) by affinity (see `data/ligands.smi`).
 
-## Module structure (`dockinglib/`)
+## Module structure (`dd_docking/`)
 
 | Module | Role |
 |---|---|
@@ -295,7 +295,7 @@ df = run_ensemble_docking(
 | `parallel.py` | `parallel_map` — parallelizes independent tasks over `ProcessPoolExecutor` |
 | `progress.py` | `DockProgress` / `RefineProgress` — one printed line per completed task |
 | `pipeline.py` | high-level functions chaining prep -> docking -> MD refinement |
-| `cli.py` | `dockinglib-prep` / `dockinglib-dock` / `dockinglib-refine` commands |
+| `cli.py` | `dd_docking-prep` / `dd_docking-dock` / `dd_docking-refine` commands |
 
 ## Limitations and possible extensions
 

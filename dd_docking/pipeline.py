@@ -35,7 +35,7 @@ def run_ensemble_docking(
     refine_top_n: int = 5,
     refine_prod_ps: float = 100.0,
 ) -> pd.DataFrame:
-    """Load a prepared ensemble (from `dockinglib-prep`'s `manifest.json`),
+    """Load a prepared ensemble (from `dd_docking-prep`'s `manifest.json`),
     dock a `.smi` ligand library against it, and optionally MD-refine the
     top hits. Returns the ranked-results DataFrame (post-refine re-ranking
     if `refine=True`, otherwise the raw Vina ranking).

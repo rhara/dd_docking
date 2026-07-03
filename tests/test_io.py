@@ -1,5 +1,5 @@
-from dockinglib.io import read_results_csv, write_results_csv
-from dockinglib.ligand_prep import read_smi
+from dd_docking.io import read_results_csv, write_results_csv
+from dd_docking.ligand_prep import read_smi
 
 
 def test_write_read_results_csv_roundtrip(tmp_path):

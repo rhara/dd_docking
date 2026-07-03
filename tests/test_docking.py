@@ -1,7 +1,7 @@
 """Tests for the Vina wrapper in docking.py.
 
 These reuse the real rigid/flex PDBQT receptor fixtures already checked
-into data/ensemble/ (produced by an earlier real dockinglib-prep run) so
+into data/ensemble/ (produced by an earlier real dd_docking-prep run) so
 we exercise the actual `vina` package end-to-end, but keep exhaustiveness
 low and the ligand tiny so the whole suite still runs in well under a
 minute.
@@ -12,7 +12,7 @@ import pytest
 
 vina = pytest.importorskip("vina")
 
-from dockinglib.docking import dock_ligand, make_vina  # noqa: E402
+from dd_docking.docking import dock_ligand, make_vina  # noqa: E402
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "ensemble"
 _RIGID_PDBQT = _DATA_DIR / "6w63_rigid.pdbqt"
@@ -47,7 +47,7 @@ def test_dock_ligand_returns_none_on_invalid_pdbqt():
 
 def test_dock_ligand_real_small_ligand_returns_affinity_and_poses():
     ligand_prep = pytest.importorskip("meeko")
-    from dockinglib.ligand_prep import prepare_ligand_pdbqt
+    from dd_docking.ligand_prep import prepare_ligand_pdbqt
 
     pdbqt = prepare_ligand_pdbqt("CCO", seed=0)  # ethanol: tiny, embeds fast
     assert pdbqt is not None

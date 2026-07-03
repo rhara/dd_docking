@@ -1,7 +1,7 @@
 """Command-line entry points:
-  dockinglib-prep    --member ID PDB LIG_RESNAME ... -o ensemble_dir
-  dockinglib-dock     ensemble_dir ligands.smi -o out_dir
-  dockinglib-refine   out_dir/ranked_results.csv -o out_dir/refine
+  dd_docking-prep    --member ID PDB LIG_RESNAME ... -o ensemble_dir
+  dd_docking-dock     ensemble_dir ligands.smi -o out_dir
+  dd_docking-refine   out_dir/ranked_results.csv -o out_dir/refine
 """
 import argparse
 from pathlib import Path
@@ -12,7 +12,7 @@ from . import ligand_prep, refine_md, screening
 
 def build_prep_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dockinglib-prep",
+        prog="dd_docking-prep",
         description=(
             "Fix N receptor conformations with PDBFixer and prepare Vina-ready "
             "rigid/flexible-side-chain PDBQT files (an 'ensemble') from them."
@@ -50,10 +50,10 @@ def main_prep(argv=None):
 
 def build_dock_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dockinglib-dock",
+        prog="dd_docking-dock",
         description="Dock a ligand library against every member of a prepared ensemble and rank by best-of-ensemble affinity.",
     )
-    parser.add_argument("ensemble_dir", help="Directory containing manifest.json from dockinglib-prep")
+    parser.add_argument("ensemble_dir", help="Directory containing manifest.json from dd_docking-prep")
     parser.add_argument("ligand_smi", help=".smi file: 'SMILES  ID' per line")
     parser.add_argument("-o", "--out-dir", required=True, help="Output directory for ranked_results.csv / top_hits.sdf")
     parser.add_argument("--exhaustiveness", type=int, default=16)
@@ -84,10 +84,10 @@ def main_dock(argv=None):
 
 def build_refine_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="dockinglib-refine",
+        prog="dd_docking-refine",
         description="Short implicit-solvent OpenMM MD rescoring of the top-ranked docking hits (induced-fit-style pocket relaxation).",
     )
-    parser.add_argument("ranked_csv", help="ranked_results.csv from dockinglib-dock")
+    parser.add_argument("ranked_csv", help="ranked_results.csv from dd_docking-dock")
     parser.add_argument("-o", "--out-dir", required=True, help="Output directory for per-hit MD workdirs and md_rescore.csv")
     parser.add_argument("--top-n", type=int, default=5)
     parser.add_argument("--prod-ps", type=float, default=100.0, help="Production MD length per hit, in picoseconds")

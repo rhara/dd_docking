@@ -1,6 +1,6 @@
 import json
 
-from dockinglib.ensemble import EnsembleMember, load_manifest, save_manifest
+from dd_docking.ensemble import EnsembleMember, load_manifest, save_manifest
 
 
 def _member(member_id="m1", flex_pdbqt="m1_flex.pdbqt"):
@@ -48,7 +48,7 @@ def test_load_manifest_preserves_none_flex_pdbqt(tmp_path):
 
 def test_load_manifest_reads_real_repo_fixture():
     # Reuse the manifest already checked into data/ensemble/ from an
-    # earlier real dockinglib-prep run, to make sure load_manifest can
+    # earlier real dd_docking-prep run, to make sure load_manifest can
     # parse a real (not just synthetic) manifest.json.
     from pathlib import Path
 
