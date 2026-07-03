@@ -1,0 +1,92 @@
+Purpose: Perform ensemble docking, incorporating some degree of dynamic
+  pocket-side behavior such as induced fit. Proteins must first be properly
+  structure-repaired with tools such as pdbfixer.
+
+Requirements:
+  Basic policy:
+    - Set this up as a new project for a general-purpose tool (a reusable
+      package usable for any target, not tied to a specific target/ligand
+      set; same policy as rocslib/omegalib/plviewerlib)
+    - Working directory is ~/work/docking; consolidate modules under
+      dockinglib, splitting reusable functions/classes as much as possible
+    - Use the conda env `mpro` (vina, meeko, pdbfixer, openmm,
+      openmmforcefields, openff-toolkit, mdtraj already present). No need to
+      create a new env
+    - CLI uses argparse. Split into three console commands, dockinglib-prep /
+      dockinglib-dock / dockinglib-refine (so receptor-ensemble preparation /
+      screening / post-MD processing can be run independently, while also
+      allowing an end-to-end run via pipeline.py)
+    - For long-running batch processing, print one line of progress per
+      completed item with print(flush=True) (the rocslib/progress.py
+      approach, not a tqdm-style progress bar)
+    - Independent tasks (e.g. ligand x ensemble-member combinations) should be
+      runnable via a ProcessPoolExecutor-based parallel map (--n-jobs,
+      sequential by default)
+
+  Ensemble structure (multiple receptor conformations):
+    - Take multiple PDBs (co-crystal structures) as input. Each structure is
+      individually structure-repaired with PDBFixer (filling in missing
+      residues/atoms, replacing nonstandard residues, removing heteroatoms
+      such as water/ions/co-crystallized ligands). No hydrogens are added at
+      this stage (since the downstream Meeko performs its own protonation/
+      charge assignment, and adding hydrogens beforehand would conflict with
+      that)
+    - After chain extraction on each structure, renumber residues 1..N,
+      insert TER at backbone breaks, and rename disulfide-bonded CYS to CYX
+      (to avoid problems in PDBFixer/Meeko; auto-detected by distance)
+    - Determine the docking box (center, size, with specifiable padding) from
+      each member's co-crystallized ligand coordinates
+
+  Pocket-side dynamic behavior (induced fit) is represented in two stages:
+    1. Vina + Meeko flexible side-chain docking: automatically detect pocket
+       residues within a distance cutoff (default 5 Å, specifiable) from the
+       co-crystallized ligand, and generate rigid/flex PDBQT pairs using
+       Meeko's `mk_prepare_receptor.py -f FLEXRES`. Vina also accepts both
+       rigid_pdbqt and flex_pdbqt (using the Python API
+       `Vina.set_receptor(rigid, flex)`)
+    2. Short local MD post-processing with OpenMM, applied only to top-ranked
+       poses: using a realistic CPU setup with implicit solvent (GBn2) +
+       hydrogen mass repartitioning (4 fs), run minimization → equilibration →
+       production, then judge stability from the ligand heavy-atom RMSD
+       time series and re-rank (limited to the top N hits rather than all, to
+       keep computational cost down)
+
+  Screening (the docking itself):
+    - Ligand input is `.smi` (SMILES + ID, tab/space separated)
+    - SMILES → 3D embedding (ETKDGv3) → MMFF optimization → ligand PDBQT
+      generation via Meeko
+    - Dock each ligand against every member of the ensemble, keeping the
+      per-member affinity while ranking ligands by their best (lowest)
+      affinity (best-of-ensemble approach)
+    - Output results as a CSV (rank, ligand ID, SMILES, best member, best
+      affinity, per-member affinities, pose PDBQT path for downstream MD, and
+      receptor PDB path) plus pose SDFs for the top hits
+    - Pose SDFs use the property name `affinity` for the score so they can be
+      loaded directly into the existing protein-ligand viewer
+      (~/work/viewer, plviewerlib) (one of
+      plviewerlib.scoring.SCORE_PROPERTY_CANDIDATES)
+
+  Test data:
+    - Multiple SARS-CoV-2 Mpro PDB structures with genuinely different pocket
+      conformations (e.g. 6W63 / 7L11 / 7L10, each bound to a different
+      inhibitor), fetched from RCSB, used as ensemble members
+    - A `.smi` library containing each member's co-crystallized ligand (for
+      self-docking validity checks) mixed with a few unrelated molecules such
+      as approved drugs
+
+  Validation:
+    - The generated rigid/flex PDBQTs load into Vina and grid maps can be
+      computed
+    - Per-member affinities actually vary (evidence that the ensemble is
+      working)
+    - MD post-processing completes in a realistic time on CPU, and the
+      RMSD/stability columns are populated
+    - The output receptor PDBs and pose SDFs can be loaded by the existing
+      plviewerlib viewer
+    - pytest smoke tests (tests/, in the rocslib/tests/ style; pure-Python
+      parts only: pocket-residue detection, flexres formatting, ranking
+      logic, CSV I/O)
+
+  Documentation:
+    - Provide PROMPT (this file) and README.md (setup, usage, CLI examples,
+      module layout)
