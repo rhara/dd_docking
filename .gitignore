@@ -5,7 +5,7 @@ __pycache__/
 *.html
 .pytest_cache/
 
-# dockinglib-prep / dockinglib-dock / dockinglib-refine outputs (reproducible
+# dd_docking-prep / dd_docking-dock / dd_docking-refine outputs (reproducible
 # from data/raw/*.pdb + data/ligands.smi via the commands in README.md)
 data/ensemble/
 data/screen/
