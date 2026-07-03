@@ -1,14 +1,13 @@
 """Pocket definition: docking box geometry and flexible-residue selection.
 
-No existing project has equivalent code (confirmed during exploration) --
-`compute_box` is ported from `.archives/a2a-vs/vslib/docking.py`, and
-residue-within-cutoff detection / Meeko flexres formatting is new.
+`compute_box` computes docking-box center/size from ligand coordinates;
+residue-within-cutoff detection and Meeko flexres formatting live here too.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 Coord = Tuple[float, float, float]
 
@@ -23,7 +22,7 @@ def compute_box(ligand_lines: Sequence[str], padding: float = 5.0):
             ys.append(float(ln[38:46]))
             zs.append(float(ln[46:54]))
     if not xs:
-        raise ValueError("compute_box: リガンド原子が見つかりません")
+        raise ValueError("compute_box: no ligand atoms found")
     center = [round((min(v) + max(v)) / 2, 3) for v in (xs, ys, zs)]
     size = [round((max(v) - min(v)) + 2 * padding, 3) for v in (xs, ys, zs)]
     return center, size
@@ -75,7 +74,7 @@ def find_pocket_residues(receptor_pdb: Path, ref_coords: Iterable[Coord],
     if not ref:
         return []
     cutoff2 = cutoff * cutoff
-    min_d2: dict[Residue, float] = {}
+    min_d2: Dict[Residue, float] = {}
     for chain, resnum, coord in _parse_atom_lines(Path(receptor_pdb).read_text()):
         best = None
         for rx, ry, rz in ref:

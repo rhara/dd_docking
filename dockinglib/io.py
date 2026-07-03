@@ -2,7 +2,7 @@
 
 Pose SDF properties use `affinity` for the docking score (matches one of
 `plviewerlib.scoring.SCORE_PROPERTY_CANDIDATES`, so results written here
-load directly into the existing protein-ligand viewer at ~/work/viewer).
+load directly into the companion protein-ligand viewer, `plviewerlib`).
 """
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ import pandas as pd
 def pdbqt_string_to_mol(pdbqt: str):
     """Convert a Vina pose PDBQT string (first/best pose) to an RDKit Mol,
     including flexible side-chain atoms when present. Returns None on
-    failure. Adapted from `_ligand_from_pose()` in
-    `.archives/mpro-drug-discovery/src/step7_md.py`.
+    failure.
     """
     from meeko import PDBQTMolecule, RDKitMolCreate
     from rdkit import Chem

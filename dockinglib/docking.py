@@ -1,8 +1,6 @@
 """Thin AutoDock Vina wrapper, extended for flexible-side-chain receptors.
 
-Adapted from `make_vina()`/`dock_ligand()` in
-`.archives/a2a-vs/vslib/docking.py`, adding the `flex_pdbqt` argument that
-the installed Vina 1.2.7 Python API already supports
+Uses the `flex_pdbqt` argument that Vina's Python API (1.2.7+) supports
 (`Vina.set_receptor(rigid_pdbqt_filename, flex_pdbqt_filename)`).
 """
 from __future__ import annotations
