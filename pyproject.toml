@@ -1,0 +1,18 @@
+[project]
+name = "dockinglib"
+version = "0.1.0"
+description = "Ensemble docking toolkit with flexible-side-chain sampling and MD-based induced-fit rescoring"
+requires-python = ">=3.10"
+dependencies = ["rdkit", "numpy", "pandas"]
+
+[project.scripts]
+dockinglib-prep = "dockinglib.cli:main_prep"
+dockinglib-dock = "dockinglib.cli:main_dock"
+dockinglib-refine = "dockinglib.cli:main_refine"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dockinglib"]

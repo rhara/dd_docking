@@ -1,0 +1,76 @@
+目的: アンサンブルドッキングをしたい。そしてインデュースドフィットなど多少の
+  ポケット側の動的な挙動も取り入れたい。蛋白はpdbfixer等できちんと構造修正の上。
+
+要件:
+  基本方針:
+    - 汎用ツールとして新規プロジェクト化する（特定の標的・リガンド群に依存しない、
+      任意のターゲットに使い回せる再利用可能パッケージにする。rocslib/omegalib/
+      plviewerlib と同じ方針）
+    - 作業ディレクトリは ~/work/docking、モジュールは dockinglib にまとめ、
+      再利用可能な関数やクラスをできるだけ分割する
+    - conda env `mpro`（vina, meeko, pdbfixer, openmm, openmmforcefields,
+      openff-toolkit, mdtraj が既存）を使う。新規env作成は不要
+    - CLIはargparse。コンソールコマンドは dockinglib-prep / dockinglib-dock /
+      dockinglib-refine の3つに分ける（受容体アンサンブル準備／スクリーニング／
+      MD後処理を独立実行できるようにしつつ、pipeline.py で一気通貫にもできるようにする）
+    - 長時間バッチ処理は完了ごとに1行ずつ進捗をprint(flush=True)する
+      （tqdmのようなプログレスバーではなく、rocslib/progress.py 方式）
+    - 独立なタスク（リガンド×アンサンブルメンバーの組み合わせなど）は
+      ProcessPoolExecutorベースの並列マップで実行できるようにする（--n-jobs、
+      既定は逐次実行）
+
+  アンサンブル構造（受容体の複数コンフォメーション）:
+    - 複数のPDB（co-crystal構造）を入力とする。各構造は個別にPDBFixerで
+      構造修正する（欠損残基・原子の補完、非標準残基の置換、水・イオン・
+      共結晶リガンドなどのヘテロ原子除去）。水素はここでは付加しない
+      （後段のMeekoが独自にプロトン化・電荷付与するため、事前に水素を
+      付けると衝突する）
+    - 各構造でチェイン抽出後に残基番号を1..Nへ振り直し、主鎖切断箇所にTERを
+      挿入し、S-S結合しているCYSはCYXにリネームする（PDBFixer/Meekoでの
+      事故防止。距離ベースで自動検出）
+    - 各メンバーの共結晶リガンド座標からドッキングボックス（中心・サイズ、
+      パディング指定可）を決める
+
+  ポケット側の動的挙動（誘導適合）は2段階で表現する:
+    1. Vina + Meeko のフレキシブル側鎖ドッキング: 共結晶リガンドからの距離
+       カットオフ（既定5Å、指定可）以内の残基をポケット残基として自動検出し、
+       Meekoの `mk_prepare_receptor.py -f FLEXRES` でrigid/flexのPDBQTペアを
+       生成する。Vina側もrigid_pdbqt + flex_pdbqtの両方を受け取れる
+       （Python API `Vina.set_receptor(rigid, flex)` を使う）
+    2. 上位ランクのポーズのみ、OpenMMで短時間の局所MD後処理を行う: 陰溶媒
+       (GBn2) + 水素質量再配分(4fs) のCPUで現実的な設定で、最小化→平衡化→
+       本計算を行い、リガンド重原子RMSDの時系列から安定性を判定して
+       再ランキングする（全ヒットではなく上位N件だけに限定し、計算コストを
+       抑える）
+
+  スクリーニング（ドッキング本体）:
+    - リガンド入力は `.smi`（SMILES + ID、タブ/空白区切り）
+    - SMILES → 3D埋め込み（ETKDGv3）→ MMFF最適化 → Meekoで配位子PDBQT化
+    - 各リガンドを、アンサンブルの全メンバーに対してドッキングし、
+      メンバーごとのaffinityを保持しつつ、最良（最も低い）affinityで
+      リガンドをランキングする（best-of-ensemble方式）
+    - 結果はCSV（順位・リガンドID・SMILES・最良メンバー・最良affinity・
+      メンバーごとのaffinity・後段MD用のポーズPDBQTパスと受容体PDBパスを含む）
+      と、上位ヒットのポーズSDFで出力する
+    - ポーズSDFは既存の蛋白-リガンドビューア（~/work/viewer, plviewerlib）に
+      そのまま読み込めるよう、スコアのプロパティ名を `affinity` にする
+      （plviewerlib.scoring.SCORE_PROPERTY_CANDIDATES の1つ）
+
+  テストデータ:
+    - SARS-CoV-2 Mpro の、ポケットのコンフォメーションが実際に異なる複数の
+      PDB構造（例: 6W63 / 7L11 / 7L10、それぞれ異なる阻害剤が結合）をRCSBから
+      取得し、アンサンブルメンバーとする
+    - 各メンバーの共結晶リガンド（自己ドッキングの妥当性確認用）と、
+      承認薬など無関係な分子を数個混ぜた `.smi` ライブラリを用意する
+
+  検証:
+    - 生成したrigid/flex PDBQTがVinaにロードでき、グリッドマップが計算できること
+    - メンバーごとのaffinityが実際にばらつくこと（アンサンブルが機能している証拠）
+    - MD後処理が現実的な時間でCPU上完了し、RMSD/安定性列が埋まること
+    - 出力した受容体PDB・ポーズSDFが既存の plviewerlib ビューアで読み込めること
+    - pytestのスモークテスト（tests/、rocslib/tests/ スタイル。純Python部分の
+      み: ポケット残基検出・flexres整形・ランキングロジック・CSV入出力）
+
+  ドキュメント:
+    - PROMPT（このファイル）とREADME.md（セットアップ・使い方・CLI例・
+      モジュール構成）を用意する

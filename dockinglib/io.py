@@ -1,0 +1,52 @@
+"""PDBQT<->RDKit conversion, pose SDF writing, and results CSV I/O.
+
+Pose SDF properties use `affinity` for the docking score (matches one of
+`plviewerlib.scoring.SCORE_PROPERTY_CANDIDATES`, so results written here
+load directly into the existing protein-ligand viewer at ~/work/viewer).
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import pandas as pd
+
+
+def pdbqt_string_to_mol(pdbqt: str):
+    """Convert a Vina pose PDBQT string (first/best pose) to an RDKit Mol,
+    including flexible side-chain atoms when present. Returns None on
+    failure. Adapted from `_ligand_from_pose()` in
+    `.archives/mpro-drug-discovery/src/step7_md.py`.
+    """
+    from meeko import PDBQTMolecule, RDKitMolCreate
+    from rdkit import Chem
+
+    try:
+        pmol = PDBQTMolecule(pdbqt, skip_typing=True)
+        rdmol = RDKitMolCreate.from_pdbqt_mol(pmol)[0]
+    except Exception:  # noqa: BLE001
+        return None
+    best = Chem.Mol(rdmol)
+    best.RemoveAllConformers()
+    best.AddConformer(rdmol.GetConformer(0), assignId=True)
+    return best
+
+
+def write_pose_sdf(out_sdf: str, records: Sequence[Tuple[Any, Dict[str, Any]]]) -> None:
+    """Write an SDF where each record is (rdkit_mol, properties_dict)."""
+    from rdkit import Chem
+
+    writer = Chem.SDWriter(str(out_sdf))
+    for mol, props in records:
+        for key, value in props.items():
+            mol.SetProp(key, str(value))
+        writer.write(mol)
+    writer.close()
+
+
+def write_results_csv(out_csv: str, rows: List[Dict[str, Any]]) -> None:
+    pd.DataFrame(rows).to_csv(out_csv, index=False)
+
+
+def read_results_csv(path: str) -> pd.DataFrame:
+    return pd.read_csv(path)

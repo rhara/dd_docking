@@ -3,3 +3,9 @@ __pycache__/
 *.egg-info/
 .venv/
 *.html
+.pytest_cache/
+
+# dockinglib-prep / dockinglib-dock / dockinglib-refine outputs (reproducible
+# from data/raw/*.pdb + data/ligands.smi via the commands in README.md)
+data/ensemble/
+data/screen/
