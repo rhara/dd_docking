@@ -1,8 +1,8 @@
 """PDBQT<->RDKit conversion, pose SDF writing, and results CSV I/O.
 
 Pose SDF properties use `affinity` for the docking score (matches one of
-`plviewerlib.scoring.SCORE_PROPERTY_CANDIDATES`, so results written here
-load directly into the companion protein-ligand viewer, `plviewerlib`).
+`dd_viewer.scoring.SCORE_PROPERTY_CANDIDATES`, so results written here
+load directly into the companion protein-ligand viewer, `dd_viewer`).
 """
 from __future__ import annotations
 

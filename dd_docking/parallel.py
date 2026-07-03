@@ -1,5 +1,5 @@
 """Generic embarrassingly-parallel map helper for independent per-ligand
-docking tasks (copied from overlaylib/parallel.py to avoid a cross-package
+docking tasks (copied from dd_overlay/parallel.py to avoid a cross-package
 dependency; kept identical since the pattern is domain-agnostic).
 """
 import os

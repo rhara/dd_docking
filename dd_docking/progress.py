@@ -1,5 +1,5 @@
 """Progress reporting: one concise line per completed item, printed to
-stdout with flush=True (mirrors overlaylib/progress.py and embodylib's
+stdout with flush=True (mirrors dd_overlay/progress.py and dd_confgen's
 pipeline.py console conventions)."""
 
 

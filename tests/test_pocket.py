@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dockinglib.pocket import Residue, compute_box, find_pocket_residues, format_flexres
+from dd_docking.pocket import Residue, compute_box, find_pocket_residues, format_flexres
 
 # Two ATOM lines (chain A, resnum 10 and 20) and one far-away line (resnum 99).
 _PDB_TEXT = (

@@ -2,7 +2,7 @@
 member (receptor conformation) and rank ligands by their best-of-ensemble
 affinity.
 
-Shape mirrors `overlaylib/screening.py`'s "run N items, keep the best, rank"
+Shape mirrors `dd_overlay/screening.py`'s "run N items, keep the best, rank"
 pattern, but here "N" is ensemble members per ligand rather than conformers
 per molecule. Parallelizes over the flat (ligand, member) task grid (each
 task independently docks one ligand into one member's grid maps), matching
@@ -172,7 +172,7 @@ def write_results_csv(out_csv: str, hits: Sequence[EnsembleHit], *,
 
 
 def write_hits_sdf(out_sdf: str, hits: Sequence[EnsembleHit]) -> None:
-    """Write the best pose of each hit, tagged for the `plviewerlib` viewer
+    """Write the best pose of each hit, tagged for the `dd_viewer` viewer
     (`affinity` property is one of its recognized score keys)."""
     records = []
     for rank, hit in enumerate(hits, start=1):
