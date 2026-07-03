@@ -1,7 +1,7 @@
 """Ligand preparation: read a `.smi` library and embed/prepare each SMILES
 as a PDBQT string for Vina.
 
-`.smi` parsing mirrors `omegalib/io_utils.py:read_smi`.
+`.smi` parsing mirrors `embodylib/io_utils.py:read_smi`.
 """
 from __future__ import annotations
 

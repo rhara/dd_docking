@@ -2,7 +2,7 @@
 member (receptor conformation) and rank ligands by their best-of-ensemble
 affinity.
 
-Shape mirrors `rocslib/screening.py`'s "run N items, keep the best, rank"
+Shape mirrors `overlaylib/screening.py`'s "run N items, keep the best, rank"
 pattern, but here "N" is ensemble members per ligand rather than conformers
 per molecule. Parallelizes over the flat (ligand, member) task grid (each
 task independently docks one ligand into one member's grid maps), matching

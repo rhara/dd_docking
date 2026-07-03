@@ -1,5 +1,5 @@
 """Progress reporting: one concise line per completed item, printed to
-stdout with flush=True (mirrors rocslib/progress.py and omegalib's
+stdout with flush=True (mirrors overlaylib/progress.py and embodylib's
 pipeline.py console conventions)."""
 
 
