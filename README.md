@@ -2,7 +2,7 @@
 
 An ensemble docking toolkit with induced-fit-style pocket dynamics for
 virtual screening. Designed as a reusable package, not tied to any specific
-target or ligand set (same philosophy as `rocs` / `omega` / `viewer`).
+target or ligand set (same philosophy as `overlay` / `embody` / `viewer`).
 
 - **Ensemble preparation (`dockinglib-prep`)**: structurally repairs multiple
   receptor conformations (PDB) with PDBFixer, determines the docking box and
