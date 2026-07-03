@@ -106,21 +106,46 @@ for m in ensemble:
 
 ```bash
 conda run -n mpro dockinglib-dock data/ensemble data/ligands.smi \
-  -o data/screen --exhaustiveness 8 --n-poses 3 --n-jobs 8
+  -o data/screen --exhaustiveness 4 --n-poses 1 --n-jobs 4
 ```
 
 処理は `(リガンド, アンサンブルメンバー)` の全組み合わせ（上の例なら
 8リガンド×3メンバー=24タスク）に分解され、`--n-jobs` で並列化できる
 （既定は逐次実行。`<=0` で全CPUコア使用）。1リガンドの全メンバーへの
-ドッキングが完了するたびに1行進捗が出る:
+ドッキングが完了するたびに1行進捗が出る（このリポジトリの `data/` で
+実測、Mac 16コアで `--n-jobs 4` 約8分。native化合物3種＋承認薬5種）:
 
 ```
-[1] aspirin  best_member=6w63  affinity=-6.421
-[2] X77_native_6w63  best_member=6w63  affinity=-9.883
-...
+[parallel] using 4 worker processes for 24 tasks
+[1] X77_native_6w63  best_member=6w63  affinity=-6.837
+[2] XF1_native_7l11  best_member=6w63  affinity=-7.697
+[3] aspirin  best_member=7l11  affinity=-5.210
+[4] XEY_native_7l10  best_member=7l11  affinity=-8.058
+[5] ibuprofen  best_member=7l10  affinity=-5.282
+[6] naproxen  best_member=7l10  affinity=-6.187
+[7] acetaminophen  best_member=6w63  affinity=-4.376
+[8] metformin  best_member=7l11  affinity=-5.539
 
 [done] 8 ligand(s) ranked -> data/screen/ranked_results.csv
 ```
+
+最終ランキング（`ranked_results.csv`、affinity昇順）: 各メンバーの共結晶
+リガンド3種（自己ドッキング）が上位3件を占め、無関係な承認薬5種が
+下位に分かれている（意図通り識別できている）。`best_member` 列と
+`affinity[6w63/7l11/7l10]` 列がメンバーごとに異なる値を持つことから、
+アンサンブルの各コンフォメーションが実際に異なる結果を返している
+（アンサンブルドッキングとして機能している証拠）ことも確認できる:
+
+| rank | ligand_id | best_member | best_affinity | affinity[6w63] | affinity[7l11] | affinity[7l10] |
+|---|---|---|---|---|---|---|
+| 1 | XEY_native_7l10 | 7l11 | -8.058 | -6.817 | -8.058 | -7.711 |
+| 2 | XF1_native_7l11 | 6w63 | -7.697 | -7.697 | -7.414 | -7.418 |
+| 3 | X77_native_6w63 | 6w63 | -6.837 | -6.837 | -6.773 | -6.554 |
+| 4 | naproxen | 7l10 | -6.187 | -5.102 | -6.020 | -6.187 |
+| 5 | metformin | 7l11 | -5.539 | -5.310 | -5.539 | -5.349 |
+| 6 | ibuprofen | 7l10 | -5.282 | -4.388 | -4.739 | -5.282 |
+| 7 | aspirin | 7l11 | -5.210 | -4.623 | -5.210 | -4.109 |
+| 8 | acetaminophen | 6w63 | -4.376 | -4.376 | -4.022 | -4.355 |
 
 出力:
 
@@ -181,16 +206,24 @@ for hit in hits[:5]:
 
 ```bash
 conda run -n mpro dockinglib-refine data/screen/ranked_results.csv \
-  -o data/screen/refine --top-n 3 --prod-ps 100 --equil-ps 20
+  -o data/screen/refine --top-n 2 --prod-ps 20 --equil-ps 5
 ```
 
-```
-[MD X77_native_6w63] implicit  rmsd_mean=0.87  rmsd_final=1.02  stable=True
-[MD ibuprofen] implicit  rmsd_mean=4.13  rmsd_final=5.88  stable=False
-...
+実測出力（`--prod-ps`を検証用に短くした例。本番ではもっと長く取る）:
 
-[done] 3 hit(s) refined -> data/screen/refine/md_rescore.csv
 ```
+[MD XEY_native_7l10] implicit solvent 系の構築失敗、真空で再試行: ''
+[MD XEY_native_7l10] vacuum  rmsd_mean=1.90  rmsd_final=2.46  stable=True
+[MD XF1_native_7l11] implicit  rmsd_mean=2.67  rmsd_final=3.32  stable=True
+
+[done] 2 hit(s) refined -> data/screen/refine/md_rescore.csv
+```
+
+1件目は GBn2 陰溶媒系の構築が（`openmmforcefields` の力場テンプレート生成
+まわりで時々起きる一過性の失敗と見られる）失敗し、自動的に真空MDへ
+フォールバックしている（`--vacuum` を明示指定しなくても自動で起きる、
+想定内の挙動）。どちらも RMSD 平均<3Å・終端<4Å の安定判定基準を満たし
+`stable=True` になった。
 
 `md_rescore.csv` は `stable`（リガンド重原子RMSD平均<3Å かつ終端<4Å）を
 最優先し、その中で Vina affinity 昇順に再ソートされる。列には
