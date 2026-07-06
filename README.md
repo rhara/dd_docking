@@ -279,12 +279,22 @@ df = run_ensemble_docking(
   successfully.
 - Self-docking each member's co-crystallized ligand discriminates it from
   unrelated molecules (approved drugs) by affinity (see `data/ligands.smi`).
+- `receptor_prep.py`'s `regularize_carboxylate_geometry` fixes a PDBFixer
+  `addMissingAtoms()` quirk (a freshly-added carboxylate partner oxygen --
+  backbone OXT at a chain terminus, or Asp/Glu OD2/OE2 -- placed at a
+  chemically impossible angle from its sibling oxygen) that previously
+  crashed Meeko's `mk_prepare_receptor.py` with an oxygen valence error on
+  real PDB entries with an unblocked terminus. Confirmed fixed end to end
+  on PDB 4EQC (PAK1 kinase domain): `dd_docking-prep` now succeeds (3
+  defects detected and regularized) where it previously failed, and
+  `dd_docking-dock` docks Naringin into the repaired receptor
+  successfully (best affinity -8.646 kcal/mol, flexible side chains).
 
 ## Module structure (`dd_docking/`)
 
 | Module | Role |
 |---|---|
-| `receptor_prep.py` | PDB fetch/chain isolation/residue cleanup (TER insertion, CYX renaming), PDBFixer-based repair |
+| `receptor_prep.py` | PDB fetch/chain isolation/residue cleanup (TER insertion, CYX renaming), PDBFixer-based repair, post-PDBFixer carboxylate geometry regularization (`regularize_carboxylate_geometry`) |
 | `pocket.py` | docking box calculation, distance-based flexible-residue detection, Meeko flexres string formatting |
 | `ensemble.py` | batch receptor_prep + pocket + Meeko PDBQT generation across conformations; save/load as `manifest.json` |
 | `ligand_prep.py` | `.smi` reading, SMILES -> 3D (ETKDGv3+MMFF) -> Meeko ligand PDBQT |

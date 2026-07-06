@@ -1,3 +1,5 @@
+import pytest
+
 from dd_docking.receptor_prep import split_receptor, tidy_receptor
 
 
@@ -159,3 +161,70 @@ def test_tidy_receptor_writes_end_record(tmp_path):
     out_pdb = tmp_path / "tidy.pdb"
     tidy_receptor(lines, out_pdb)
     assert out_pdb.read_text().rstrip("\n").endswith("END")
+
+
+# --- regularize_carboxylate_geometry -------------------------------------
+# PDBFixer's addMissingAtoms() can place a freshly-added carboxylate partner
+# oxygen (backbone OXT, or Asp/Glu OD2/OE2) at a chemically impossible angle
+# from its sibling oxygen (observed as close as ~0.10-0.19 nm apart on real
+# PDB entries, instead of the ~0.22 nm a symmetric carboxylate requires).
+# Meeko's per-residue, distance-based bond perception then misreads that as
+# a real O-O bond and crashes with an oxygen valence error (see 4EQC/PAK1).
+
+def _make_topology_and_positions(c, ca, o, oxt):
+    openmm = pytest.importorskip("openmm")
+    from openmm import unit
+    from openmm.app import Topology, Element
+
+    top = Topology()
+    chain = top.addChain()
+    residue = top.addResidue("SER", chain)
+    a_ca = top.addAtom("CA", Element.getBySymbol("C"), residue)
+    a_c = top.addAtom("C", Element.getBySymbol("C"), residue)
+    a_o = top.addAtom("O", Element.getBySymbol("O"), residue)
+    a_oxt = top.addAtom("OXT", Element.getBySymbol("O"), residue)
+    top.addBond(a_ca, a_c)
+    top.addBond(a_c, a_o)
+    top.addBond(a_c, a_oxt)
+    positions = unit.Quantity([ca, c, o, oxt], unit.nanometer)
+    return top, positions, (a_ca.index, a_c.index, a_o.index, a_oxt.index)
+
+
+def test_regularize_carboxylate_geometry_fixes_close_oxygens():
+    from openmm import unit
+
+    from dd_docking.receptor_prep import regularize_carboxylate_geometry
+
+    # C-O and C-OXT bond lengths are individually normal, but OXT was placed
+    # almost on top of O (0.08 nm apart) -- the exact defect pattern seen on
+    # 4EQC's PDBFixer-added chain-terminus OXT atoms.
+    c, ca = (-0.5186, 1.6081, -1.7680), (-0.5608, 1.5053, -1.6656)
+    o, oxt = (-0.4747, 1.5722, -1.8777), (-0.5026, 1.4951, -1.8106)
+    top, positions, (i_ca, i_c, i_o, i_oxt) = _make_topology_and_positions(c, ca, o, oxt)
+
+    fixed = regularize_carboxylate_geometry(top, positions)
+    fixed_nm = fixed.value_in_unit(unit.nanometer)
+
+    import numpy as np
+    new_o, new_oxt, new_c = np.array(fixed_nm[i_o]), np.array(fixed_nm[i_oxt]), np.array(fixed_nm[i_c])
+    assert np.linalg.norm(new_o - new_oxt) == pytest.approx(0.22, abs=0.02)
+    # Each oxygen's own C-O bond length is preserved.
+    assert np.linalg.norm(new_o - new_c) == pytest.approx(0.1235, abs=0.005)
+    assert np.linalg.norm(new_oxt - new_c) == pytest.approx(0.1219, abs=0.005)
+
+
+def test_regularize_carboxylate_geometry_leaves_well_formed_carboxylate_alone():
+    from openmm import unit
+
+    from dd_docking.receptor_prep import regularize_carboxylate_geometry
+
+    # A normal, already-correct carboxylate (O-O ~0.22 nm): must be left untouched.
+    c, ca = (0.0, 0.0, 0.0), (0.0, 0.0, 0.15)
+    o, oxt = (0.11, 0.0, -0.07), (-0.11, 0.0, -0.07)
+    top, positions, (i_ca, i_c, i_o, i_oxt) = _make_topology_and_positions(c, ca, o, oxt)
+
+    fixed = regularize_carboxylate_geometry(top, positions)
+    fixed_nm = fixed.value_in_unit(unit.nanometer)
+    orig_nm = positions.value_in_unit(unit.nanometer)
+    for i in (i_ca, i_c, i_o, i_oxt):
+        assert fixed_nm[i] == pytest.approx(orig_nm[i], abs=1e-9)

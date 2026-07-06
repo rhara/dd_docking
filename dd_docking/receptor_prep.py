@@ -126,6 +126,81 @@ def tidy_receptor(receptor_lines, out_pdb: Path, ss_cut: float = 2.5) -> int:
     return len(ss_idx) // 2
 
 
+def regularize_carboxylate_geometry(topology, positions, *, bad_distance_nm: float = 0.20):
+    """Fix a PDBFixer `addMissingAtoms()` quirk: a freshly-added carboxylate
+    partner oxygen (backbone OXT at a chain terminus, or Asp/Glu OD2/OE2)
+    can end up at a chemically impossible angle from its sibling oxygen --
+    observed as close as ~0.10-0.19 nm apart instead of the ~0.22 nm a
+    symmetric carboxylate requires, with individually normal C-O bond
+    lengths (the angle is wrong, not the bond length). A real, well-formed
+    carboxylate's two oxygens are consistently ~0.21-0.23 nm apart, so
+    0.20 nm cleanly separates genuine defects from normal geometry. Meeko's
+    per-residue, purely-distance-based bond perception (`mk_prepare_receptor.py`,
+    via RDKit's `DetermineConnectivity`) then misreads the short O-O
+    distance as a real bond and crashes with an oxygen valence error.
+
+    Detects any carbon bonded to exactly two oxygens closer to each other
+    than `bad_distance_nm`. The carbon is sp2 (three substituents: the two
+    oxygens plus one "stem" neighbor -- CA for a backbone terminus, CG/CB
+    for a Glu/Asp side chain), so the O-C-O bisector is fixed by trigonal
+    geometry: opposite the stem bond, independent of the (broken) original
+    oxygen positions. Rebuilds both oxygens there, ~124 degrees apart,
+    preserving each one's own original C-O bond length. The rotation
+    around the stem axis is not chemically constrained by this alone and
+    is picked arbitrarily but consistently; that's fine here since the
+    goal is just a clash-free, correctly-angled geometry for Meeko/Vina,
+    not reproducing an unobserved crystallographic OXT position exactly.
+    Returns a new positions array; does not mutate `positions` in place.
+    """
+    import numpy as np
+    from openmm import unit
+
+    pos = np.array(positions.value_in_unit(unit.nanometer))
+    atoms = list(topology.atoms())
+    neighbors = {a.index: set() for a in atoms}
+    for a1, a2 in topology.bonds():
+        neighbors[a1.index].add(a2.index)
+        neighbors[a2.index].add(a1.index)
+
+    half_angle = math.radians(62.0)
+    n_fixed = 0
+    for atom in atoms:
+        if atom.element is None or atom.element.symbol != "C":
+            continue
+        o_idx = [i for i in neighbors[atom.index] if atoms[i].element and atoms[i].element.symbol == "O"]
+        if len(o_idx) != 2:
+            continue
+        i1, i2 = o_idx
+        c = pos[atom.index]
+        if np.linalg.norm(pos[i1] - pos[i2]) >= bad_distance_nm:
+            continue
+        len1, len2 = np.linalg.norm(pos[i1] - c), np.linalg.norm(pos[i2] - c)
+
+        other = [i for i in neighbors[atom.index] if i not in (i1, i2)]
+        if not other:
+            continue  # no stem bond to derive the plane from; leave as-is
+        stem = pos[other[0]] - c
+        stem_len = np.linalg.norm(stem)
+        if stem_len < 1e-6:
+            continue
+        axis = -stem / stem_len  # sp2 trigonal geometry: O-C-O bisector is opposite the stem bond
+
+        helper = pos[other[1]] - c if len(other) > 1 else np.array([1.0, 0.0, 0.0])
+        perp = helper - np.dot(helper, axis) * axis
+        if np.linalg.norm(perp) < 1e-6:
+            helper = np.array([0.0, 1.0, 0.0])
+            perp = helper - np.dot(helper, axis) * axis
+        perp = perp / np.linalg.norm(perp)
+
+        pos[i1] = c + len1 * (math.cos(half_angle) * axis + math.sin(half_angle) * perp)
+        pos[i2] = c + len2 * (math.cos(half_angle) * axis - math.sin(half_angle) * perp)
+        n_fixed += 1
+
+    if n_fixed:
+        print(f"[dd_docking] regularized {n_fixed} carboxylate geometry defect(s) from PDBFixer", flush=True)
+    return unit.Quantity(pos, unit.nanometer)
+
+
 def fix_receptor(in_pdb: Path, out_pdb: Path) -> None:
     """Run PDBFixer to complete missing heavy atoms, replace nonstandard
     residues, and strip heterogens (waters/ions/ligands). Does not add
@@ -141,8 +216,9 @@ def fix_receptor(in_pdb: Path, out_pdb: Path) -> None:
     fixer.removeHeterogens(keepWater=False)
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
+    positions = regularize_carboxylate_geometry(fixer.topology, fixer.positions)
     with open(out_pdb, "w") as fh:
-        PDBFile.writeFile(fixer.topology, fixer.positions, fh, keepIds=True)
+        PDBFile.writeFile(fixer.topology, positions, fh, keepIds=True)
 
 
 def prepare_receptor_pdb(raw_pdb: Path, out_pdb: Path, *, chain: str = "A",
