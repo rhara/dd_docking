@@ -1,30 +1,26 @@
-[English version](README.en.md)
-
 # dd_docking
 
-バーチャルスクリーニング向けの、induced-fit様のポケットダイナミクスを備えた
-アンサンブルドッキングツールキット。特定の標的やリガンドセットに紐付かない、
-再利用可能なパッケージとして設計されている（`dd_overlay` / `dd_confgen` /
-`dd_viewer` と同じ思想）。
+An ensemble docking toolkit with induced-fit-style pocket dynamics for
+virtual screening. Designed as a reusable package, not tied to any specific
+target or ligand set (same philosophy as `dd_overlay` / `dd_confgen` / `dd_viewer`).
 
-- **アンサンブル準備（`dd_docking-prep`）**: 複数の受容体コンフォメーション
-  （PDB）をPDBFixerで構造修復し、各共結晶リガンドからドッキングボックスと
-  ポケット近傍のフレキシブル残基を決定し、Meekoでrigid/flexのPDBQTペアを
-  生成する。
-- **アンサンブルドッキング（`dd_docking-dock`）**: `.smi` ライブラリ内の各
-  分子を、フレキシブル側鎖付きでアンサンブルの全メンバーに対してドッキング
-  し、メンバー間で最良（最低）のアフィニティによってランキングする
-  （best-of-ensemble）。
-- **MDベースの精密化（`dd_docking-refine`）**: 上位ヒットのみを短時間の
-  暗黙溶媒MDシミュレーション（OpenMM、GBn2 + hydrogen mass repartitioning）
-  で緩和し、リガンド重原子RMSDトラジェクトリがポケット内に留まるかどうかで
-  再ランキングする——軽量なinduced-fitの健全性チェックである。
+- **Ensemble preparation (`dd_docking-prep`)**: structurally repairs multiple
+  receptor conformations (PDB) with PDBFixer, determines the docking box and
+  pocket-proximal flexible residues from each co-crystallized ligand, and
+  generates rigid/flex PDBQT pairs with Meeko.
+- **Ensemble docking (`dd_docking-dock`)**: docks each molecule in a `.smi`
+  library against every ensemble member with flexible side chains, ranking
+  by the best (lowest) affinity across members (best-of-ensemble).
+- **MD-based refinement (`dd_docking-refine`)**: relaxes top hits only with a
+  short implicit-solvent MD run (OpenMM, GBn2 + hydrogen mass repartitioning)
+  and re-ranks them by whether the ligand heavy-atom RMSD trajectory stays in
+  the pocket — a lightweight induced-fit sanity check.
 
-## インストール
+## Installation
 
-vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, mdtraj
-が必要（`pyproject.toml`の`dependencies`に明記済み）。これらはconda-forge
-経由でのインストールが最善である。
+Requires vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit,
+and mdtraj (now declared in `pyproject.toml`'s `dependencies`). These are
+best installed via conda-forge:
 
 ```bash
 conda create -n dd_docking-env python=3.10 -c conda-forge \
@@ -34,17 +30,17 @@ cd dd_docking
 pip install -e .
 ```
 
-これにより3つのコンソールコマンドがインストールされる: `dd_docking-prep`,
-`dd_docking-dock`, `dd_docking-refine`。
+This installs three console commands: `dd_docking-prep`, `dd_docking-dock`,
+`dd_docking-refine`.
 
-## 使い方
+## Usage
 
-### 1. アンサンブル準備（`dd_docking-prep`）
+### 1. Ensemble preparation (`dd_docking-prep`)
 
-受容体コンフォメーションごとに `--member ID PDB_FILE COCRYSTAL_LIGAND_CODE`
-を1回ずつ渡す。各メンバーはPDBFixerで個別に修復され、ドッキングボックスと
-ポケット残基（デフォルトカットオフ5 Å）は共結晶リガンドの座標から導出
-される。
+Pass `--member ID PDB_FILE COCRYSTAL_LIGAND_CODE` once per receptor
+conformation. Each member is repaired independently with PDBFixer, and the
+docking box plus pocket residues (default cutoff 5 Å) are derived from the
+co-crystallized ligand's coordinates.
 
 ```bash
 dd_docking-prep \
@@ -54,7 +50,7 @@ dd_docking-prep \
   -o data/ensemble
 ```
 
-出力（このリポジトリの `data/` から再現可能な実測値）:
+Output (measured, reproducible from the `data/` in this repository):
 
 ```
 6w63: 27 flexible residues -> data/ensemble/6w63_rigid.pdbqt
@@ -64,29 +60,29 @@ dd_docking-prep \
 [done] 3 member(s) -> data/ensemble/manifest.json
 ```
 
-`data/ensemble/` には、メンバーごとに `<id>_fixed.pdb`（PDBFixer適用後、
-水素なし）、`<id>_rigid.pdbqt` / `<id>_flex.pdbqt`（Meeko出力）、そして
-`manifest.json`（ボックス中心/サイズ、フレキシブル残基リスト、メンバーごとの
-ファイルパス — 後続コマンドが読み込む）が生成される。
+`data/ensemble/` gets, per member, `<id>_fixed.pdb` (post-PDBFixer, no
+hydrogens), `<id>_rigid.pdbqt` / `<id>_flex.pdbqt` (Meeko output), and
+`manifest.json` (box center/size, flexible-residue list, and file paths per
+member — read by the later commands).
 
-主なオプション:
+Key options:
 
-| オプション | デフォルト | 説明 |
+| Option | Default | Description |
 |---|---|---|
-| `--chain` | `A` | 抽出する受容体鎖 |
-| `--pocket-cutoff` | `5.0` | フレキシブル残基選定に用いる、共結晶リガンドからの距離（Å） |
-| `--max-flexres` | `10` | フレキシブル残基数の上限（リガンドに近い順；`<=0`で上限なし） |
-| `--box-padding` | `5.0` | 共結晶リガンドの範囲に対するドッキングボックスのパディング（Å） |
-| `--charge-model` | `gasteiger` | Meeko受容体部分電荷モデル（`gasteiger`/`espaloma`/`zero`） |
+| `--chain` | `A` | receptor chain to extract |
+| `--pocket-cutoff` | `5.0` | distance (Å) from the co-crystallized ligand used to select flexible residues |
+| `--max-flexres` | `10` | cap on flexible residues (nearest to ligand first; `<=0` for no cap) |
+| `--box-padding` | `5.0` | docking box padding around the co-crystallized ligand's extent (Å) |
+| `--charge-model` | `gasteiger` | Meeko receptor partial-charge model (`gasteiger`/`espaloma`/`zero`) |
 
-`--max-flexres` のデフォルト値は経験に基づいて選ばれている。リジッド
-ドッキング（事前計算済みのグリッドマップ）と異なり、フレキシブル側鎖の
-1つ1つがVinaの探索空間に実際の回転自由度を追加する。本リポジトリの
-Mpro試験データ（6W63/7L11/7L10、共結晶リガンドから5 Åのカットオフ）
-では20〜27残基がカットオフ内に入り、上限なしで1リガンドを1メンバーに
-対してドッキングすると1時間以内に終わらなかった。10（近い順）に制限
-することで実用的な実行時間になった。「念のため」上限を外したり
-カットオフを広げたりすると、容易にこの罠にはまる。
+`--max-flexres` defaults to a value chosen from experience: unlike rigid
+docking (a precomputed grid map), each flexible side chain adds a real
+rotational degree of freedom to Vina's search space. On the Mpro test data in
+this repository (6W63/7L11/7L10, 5 Å cutoff from the co-crystallized
+ligand), 20-27 residues fell within the cutoff, and docking one ligand
+against one member with no cap didn't finish in under an hour. Capping at 10
+(nearest first) brought this down to a practical runtime. Removing the cap or
+widening the cutoff to "be safe" runs into this trap easily.
 
 Python API:
 
@@ -103,21 +99,22 @@ for m in ensemble:
     print(m.member_id, len(m.flexres), m.rigid_pdbqt)
 ```
 
-### 2. アンサンブルドッキング（`dd_docking-dock`）
+### 2. Ensemble docking (`dd_docking-dock`)
 
-準備済みアンサンブルの全メンバーに対し、`.smi` ライブラリ（
-`SMILES<TAB>ID` 形式、1行1分子）をドッキングする。
+Docks a `.smi` library (`SMILES<TAB>ID` format, one molecule per line)
+against every member of a prepared ensemble.
 
 ```bash
 dd_docking-dock data/ensemble data/ligands.smi \
   -o data/screen --exhaustiveness 4 --n-poses 1 --n-jobs 4
 ```
 
-作業は `(ligand, ensemble member)` のタスクに分割され（上記の例では
-8リガンド × 3メンバー = 24タスク）、`--n-jobs`で並列化される（デフォルトは
-逐次実行；`<=0`で全CPUコアを使用）。各リガンドが全メンバーに対して
-ドッキングされるたびに進捗が1行出力される（本リポジトリのデータ、
-16コアMac、`--n-jobs 4`での実測、天然化合物3種＋承認薬5種で約8分）:
+Work is split into `(ligand, ensemble member)` tasks (8 ligands × 3 members =
+24 tasks in the example above), parallelized via `--n-jobs` (default
+sequential; `<=0` uses all CPU cores). One progress line is printed per
+ligand once it has been docked against every member (measured on this
+repository's data, 16-core Mac, `--n-jobs 4`, ~8 minutes for 3 native
+compounds + 5 approved drugs):
 
 ```
 [parallel] using 4 worker processes for 24 tasks
@@ -133,12 +130,13 @@ dd_docking-dock data/ensemble data/ligands.smi \
 [done] 8 ligand(s) ranked -> data/screen/ranked_results.csv
 ```
 
-最終ランキング（`ranked_results.csv`、アフィニティ昇順）: 3つの共結晶
-リガンド（セルフドッキング）が上位3位を占め、5つの無関係な承認薬は
-それより下位にランキングされる（意図した弁別性能）。`best_member` 列と
-メンバーごとの `affinity[6w63/7l11/7l10]` 列は行ごとに異なっており、
-アンサンブルの各コンフォメーションが実際に異なる結果を生んでいることを
-確認できる（アンサンブルドッキングが意図通り機能している証拠）:
+Final ranking (`ranked_results.csv`, affinity ascending): the three
+co-crystallized ligands (self-docking) take the top 3 spots, with the 5
+unrelated approved drugs ranked below (the intended discrimination). The
+`best_member` column and per-member `affinity[6w63/7l11/7l10]` columns
+differ across rows, confirming the ensemble's conformations actually produce
+different results (evidence that ensemble docking is functioning as
+intended):
 
 | rank | ligand_id | best_member | best_affinity | affinity[6w63] | affinity[7l11] | affinity[7l10] |
 |---|---|---|---|---|---|---|
@@ -151,43 +149,42 @@ dd_docking-dock data/ensemble data/ligands.smi \
 | 7 | aspirin | 7l11 | -5.210 | -4.623 | -5.210 | -4.109 |
 | 8 | acetaminophen | 6w63 | -4.376 | -4.376 | -4.022 | -4.355 |
 
-出力:
+Output:
 
-- `data/screen/ranked_results.csv` — 列は `rank, ligand_id, smiles,
+- `data/screen/ranked_results.csv` — columns `rank, ligand_id, smiles,
   best_member, best_affinity, receptor_pdb, pose_pdbqt,
-  affinity[<member_id>]...`。`receptor_pdb` / `pose_pdbqt` は
-  `dd_docking-refine` にそのまま渡される。
-- `data/screen/top_hits.sdf` — 各ヒットの最良ポーズを `affinity` プロパティ
-  付きで格納。**このプロパティ名は、姉妹プロジェクトである
-  蛋白-リガンドビューア（`rhara/dd_viewer`、`dd_viewer`）によりスコアとして
-  自動認識される**ため、このファイルは受容体PDB（`ranked_results.csv`の
-  `receptor_pdb` 列）と一緒にビューアへ直接読み込むことができる。
-- `data/screen/ranked_results_poses/` — ヒットごとのPDBQTファイル
-  （`dd_docking-refine` の入力）。
+  affinity[<member_id>]...`. `receptor_pdb` / `pose_pdbqt` are consumed
+  directly by `dd_docking-refine`.
+- `data/screen/top_hits.sdf` — each hit's best pose, with an `affinity`
+  property. **This property name is auto-recognized as a score by the
+  companion protein-ligand viewer (`rhara/dd_viewer`, `dd_viewer`)**, so this
+  file can be loaded directly into the viewer together with the receptor PDB
+  (the `receptor_pdb` column of `ranked_results.csv`).
+- `data/screen/ranked_results_poses/` — one PDBQT file per hit (input for
+  `dd_docking-refine`).
 
-主なオプション:
+Key options:
 
-| オプション | デフォルト | 説明 |
+| Option | Default | Description |
 |---|---|---|
-| `--exhaustiveness` | `16` | Vinaのexhaustiveness |
-| `--n-poses` | `5` | メンバーごとに保持するポーズ数 |
-| `--seed` | `0` | 乱数シード（埋め込みおよびドッキング） |
-| `--top-n` | 全件 | 上位N件の結果のみ保持 |
-| `--n-jobs` | `1` | `(ligand, member)` タスクごとの並列ワーカー数（`<=0`で全コア使用） |
-| `--no-progress` | - | 進捗ログを抑制 |
+| `--exhaustiveness` | `16` | Vina exhaustiveness |
+| `--n-poses` | `5` | poses kept per member |
+| `--seed` | `0` | random seed (embedding and docking) |
+| `--top-n` | all | keep only the top N results |
+| `--n-jobs` | `1` | parallel workers, one per `(ligand, member)` task (`<=0` for all cores) |
+| `--no-progress` | - | suppress progress log |
 
-**`--n-jobs` の挙動とCPU割り当て**: `--n-jobs 1`（デフォルト）は逐次実行
-され、各ドッキングタスクに内部的に利用可能な全コアを与える（`cpu=0`）。
-それ以外の `--n-jobs` の値では、コアがワーカープロセス間で均等に分割
-される（`cpu_count // n_jobs`、最小1）。フレキシブル側鎖ドッキングは
-リジッドドッキングよりもはるかに重く、Vina自身のマルチスレッド化の恩恵を
-大きく受けるため、軽量なリジッドドッキングでよく使われるパターン——
-`--cpu 1` に固定してジョブ側を並列化する——はここでは大きく裏目に出る
-（実測: 同条件で `cpu=1` 固定は1タスクあたり約850秒、複数コアを割り当てた
-場合は1タスクあたり約150秒で、約5.6倍）。ワーカー数を増やしすぎると各
-ワーカーのコア取り分が減り、これも遅くなる原因になり得るため、ライブラリ
-規模とアンサンブル規模に応じて控えめな値（おおむねコア数の1/4〜1/2程度）
-から始めるとよい。
+**`--n-jobs` behavior and CPU allocation**: `--n-jobs 1` (default) runs
+sequentially, giving each docking task all available cores internally
+(`cpu=0`). Any other `--n-jobs` value divides cores evenly across worker
+processes (`cpu_count // n_jobs`, minimum 1). Flexible side-chain docking is
+much heavier than rigid docking and benefits significantly from Vina's own
+multithreading, so the common pattern for lightweight rigid docking — fix
+`--cpu 1` and parallelize jobs instead — backfires badly here (measured: same
+conditions, `cpu=1` fixed took ~850s per task vs. ~150s per task with several
+cores each, about 5.6x). Setting too many workers reduces each worker's core
+share and can also slow things down, so start conservatively (roughly 1/4 to
+1/2 of core count) relative to library size and ensemble size.
 
 Python API:
 
@@ -204,20 +201,20 @@ for hit in hits[:5]:
     print(hit.ligand_id, hit.best_member, hit.best_affinity, hit.member_affinities)
 ```
 
-### 3. MD精密化と再ランキング（`dd_docking-refine`）
+### 3. MD refinement and re-ranking (`dd_docking-refine`)
 
-`dd_docking-dock` の `ranked_results.csv` から上位ヒットのみを、短時間の
-暗黙溶媒MDシミュレーション（GBn2 + hydrogen mass repartitioning、4 fs）で
-緩和・再評価する。これを（全件ではなく）上位N件に限定することで、計算
-コストを実用的な範囲に抑えている。
+Relaxes and re-evaluates only the top hits from `dd_docking-dock`'s
+`ranked_results.csv`, using a short implicit-solvent MD run (GBn2 + hydrogen
+mass repartitioning, 4 fs). Limiting this to the top N hits (rather than all
+of them) keeps the computational cost practical.
 
 ```bash
 dd_docking-refine data/screen/ranked_results.csv \
   -o data/screen/refine --top-n 2 --prod-ps 20 --equil-ps 5
 ```
 
-実測出力（`--prod-ps` はここでは簡易テスト用に短縮している。本番では
-より長い値を使用すること）:
+Measured output (`--prod-ps` shortened here for a quick test; use a longer
+value in production):
 
 ```
 [MD XEY_native_7l10] implicit solvent setup failed, retrying in vacuum: ''
@@ -227,29 +224,28 @@ dd_docking-refine data/screen/ranked_results.csv \
 [done] 2 hit(s) refined -> data/screen/refine/md_rescore.csv
 ```
 
-1件目のヒットではGBn2暗黙溶媒系のセットアップが失敗し（
-`openmmforcefields` のフォースフィールドテンプレート生成における、一過性と
-思われる不具合）、自動的に真空中MDにフォールバックした（`--vacuum` を
-渡さなくてもこのフォールバックは自動的に発生する。想定内の挙動である）。
-両ヒットとも安定性基準（RMSD平均 < 3 Å かつ最終値 < 4 Å）を満たし、
-`stable=True` と判定された。
+The first hit's GBn2 implicit-solvent system setup failed (an occasional,
+apparently transient issue in `openmmforcefields`' force-field template
+generation) and automatically fell back to vacuum MD (this fallback happens
+automatically even without passing `--vacuum`; expected behavior). Both hits
+met the stability criterion (RMSD mean < 3 Å and final < 4 Å) and were
+marked `stable=True`.
 
-`md_rescore.csv` は、まず `stable`（リガンド重原子RMSD平均 < 3 Å かつ
-最終値 < 4 Å）でソートし、その中でさらにVinaアフィニティ昇順でソート
-する。列にはこのほか `rmsd_mean` / `rmsd_final` / `rmsd_max` /
-`e_min_kcal` / `e_final_kcal` / `implicit`（GBn2暗黙溶媒を使用したか、
-真空中にフォールバックしたか）が含まれる。各ヒットの複合体構造とトラジェ
-クトリは `data/screen/refine/<rank>_<ligand_id>/`（`complex.pdb` +
-`prod.dcd`）に保存される。
+`md_rescore.csv` sorts by `stable` (ligand heavy-atom RMSD mean < 3 Å and
+final < 4 Å) first, then by Vina affinity ascending within that. Columns
+also include `rmsd_mean` / `rmsd_final` / `rmsd_max` / `e_min_kcal` /
+`e_final_kcal` / `implicit` (whether GBn2 implicit solvent was used, or it
+fell back to vacuum). Each hit's complex structure and trajectory are saved
+to `data/screen/refine/<rank>_<ligand_id>/` (`complex.pdb` + `prod.dcd`).
 
-主なオプション:
+Key options:
 
-| オプション | デフォルト | 説明 |
+| Option | Default | Description |
 |---|---|---|
-| `--top-n` | `5` | MDを実行する上位ヒット数 |
-| `--prod-ps` | `100.0` | プロダクションランの長さ（ps） |
-| `--equil-ps` | `20.0` | 平衡化の長さ（ps） |
-| `--vacuum` | - | GBn2暗黙溶媒の代わりに真空中でMDを実行（暗黙溶媒のセットアップが失敗した場合の自動フォールバックでもある） |
+| `--top-n` | `5` | number of top hits to run MD on |
+| `--prod-ps` | `100.0` | production run length (ps) |
+| `--equil-ps` | `20.0` | equilibration length (ps) |
+| `--vacuum` | - | run MD in vacuum instead of GBn2 implicit solvent (also the automatic fallback if implicit-solvent setup fails) |
 
 Python API:
 
@@ -261,10 +257,10 @@ result = refine_top_hits("data/screen/ranked_results.csv", "data/screen/refine",
 print(result[["name", "stable", "rmsd_mean", "best_affinity"]])
 ```
 
-### エンドツーエンドパイプライン（Python API）
+### End-to-end pipeline (Python API)
 
-3つのステップをまとめて実行するには（各ステップは上記のように個別に
-呼び出すこともできる）:
+To run all three steps together (each is also callable individually as
+shown above):
 
 ```python
 from dd_docking.pipeline import run_ensemble_docking
@@ -275,58 +271,57 @@ df = run_ensemble_docking(
 )
 ```
 
-## 検証済みの挙動
+## Verified behavior
 
-- `data/ensemble/` にある3つのアンサンブルメンバー（SARS-CoV-2 Mpro、
-  PDB 6W63/7L11/7L10 — それぞれ異なる阻害剤と結合した、実際に異なる
-  ポケットコンフォメーション）のrigid/flex PDBQTファイルは、問題なく
-  `vina.Vina().set_receptor(rigid, flex)` に読み込まれ、グリッドマップの
-  計算も正常に成功する。
-- 各メンバーの共結晶リガンドをセルフドッキングすると、アフィニティに
-  よって無関係な分子（承認薬）から弁別される（`data/ligands.smi` 参照）。
-- `receptor_prep.py` の `regularize_carboxylate_geometry` は、PDBFixerの
-  `addMissingAtoms()` の癖（新たに追加されたカルボキシラートのパートナー
-  酸素——鎖末端のバックボーンOXT、あるいはAsp/GluのOD2/OE2——が兄弟酸素に
-  対して化学的にありえない角度に配置される）を修正する。この不具合は
-  未ブロックの末端を持つ実際のPDBエントリにおいて、以前はMeekoの
-  `mk_prepare_receptor.py` を酸素価数エラーでクラッシュさせていた。
-  PDB 4EQC（PAK1キナーゼドメイン）でエンドツーエンドの修正を確認済み:
-  `dd_docking-prep` は以前失敗していたところで成功するようになり
-  （3件の欠陥を検出・是正）、`dd_docking-dock` はNaringinを修復済み
-  受容体に対して正常にドッキングする（最良アフィニティ -8.646 kcal/mol、
-  フレキシブル側鎖使用）。
+- Rigid/flex PDBQT files for the 3 ensemble members in `data/ensemble/`
+  (SARS-CoV-2 Mpro, PDB 6W63/7L11/7L10 — genuinely different pocket
+  conformations bound to different inhibitors) load without issue into
+  `vina.Vina().set_receptor(rigid, flex)`, and grid maps compute
+  successfully.
+- Self-docking each member's co-crystallized ligand discriminates it from
+  unrelated molecules (approved drugs) by affinity (see `data/ligands.smi`).
+- `receptor_prep.py`'s `regularize_carboxylate_geometry` fixes a PDBFixer
+  `addMissingAtoms()` quirk (a freshly-added carboxylate partner oxygen --
+  backbone OXT at a chain terminus, or Asp/Glu OD2/OE2 -- placed at a
+  chemically impossible angle from its sibling oxygen) that previously
+  crashed Meeko's `mk_prepare_receptor.py` with an oxygen valence error on
+  real PDB entries with an unblocked terminus. Confirmed fixed end to end
+  on PDB 4EQC (PAK1 kinase domain): `dd_docking-prep` now succeeds (3
+  defects detected and regularized) where it previously failed, and
+  `dd_docking-dock` docks Naringin into the repaired receptor
+  successfully (best affinity -8.646 kcal/mol, flexible side chains).
 
-## モジュール構成（`dd_docking/`）
+## Module structure (`dd_docking/`)
 
-| モジュール | 役割 |
+| Module | Role |
 |---|---|
-| `receptor_prep.py` | PDB取得/鎖単離/残基クリーンアップ（TER挿入、CYXリネーム）、PDBFixerベースの修復、PDBFixer適用後のカルボキシラート幾何是正（`regularize_carboxylate_geometry`） |
-| `pocket.py` | ドッキングボックス計算、距離ベースのフレキシブル残基検出、Meeko flexres文字列フォーマット |
-| `ensemble.py` | 複数コンフォメーションにまたがるreceptor_prep + pocket + Meeko PDBQT生成のバッチ処理、`manifest.json` としての保存/読み込み |
-| `ligand_prep.py` | `.smi` 読み込み、SMILES -> 3D（ETKDGv3+MMFF）-> Meekoリガンド PDBQT |
-| `docking.py` | フレキシブル受容体対応の薄いVinaラッパー（`make_vina` / `dock_ligand`） |
-| `screening.py` | 全リガンド × 全メンバーの並列ドッキング、best-of-ensembleランキング、CSV/SDF出力 |
-| `refine_md.py` | 上位ヒットの短時間暗黙溶媒MD緩和、RMSD安定性評価、再ランキング |
-| `io.py` | PDBQT -> RDKit変換、ポーズSDF出力、結果CSV I/O |
-| `parallel.py` | `parallel_map` — 独立したタスクを `ProcessPoolExecutor` 上で並列化 |
-| `progress.py` | `DockProgress` / `RefineProgress` — 完了タスクごとに1行出力 |
-| `pipeline.py` | prep -> docking -> MD精密化を連鎖させる高レベル関数群 |
-| `cli.py` | `dd_docking-prep` / `dd_docking-dock` / `dd_docking-refine` コマンド |
+| `receptor_prep.py` | PDB fetch/chain isolation/residue cleanup (TER insertion, CYX renaming), PDBFixer-based repair, post-PDBFixer carboxylate geometry regularization (`regularize_carboxylate_geometry`) |
+| `pocket.py` | docking box calculation, distance-based flexible-residue detection, Meeko flexres string formatting |
+| `ensemble.py` | batch receptor_prep + pocket + Meeko PDBQT generation across conformations; save/load as `manifest.json` |
+| `ligand_prep.py` | `.smi` reading, SMILES -> 3D (ETKDGv3+MMFF) -> Meeko ligand PDBQT |
+| `docking.py` | thin Vina wrapper with flexible-receptor support (`make_vina` / `dock_ligand`) |
+| `screening.py` | parallel all-ligand × all-member docking, best-of-ensemble ranking, CSV/SDF output |
+| `refine_md.py` | short implicit-solvent MD relaxation of top hits, RMSD stability evaluation, re-ranking |
+| `io.py` | PDBQT -> RDKit conversion, pose SDF output, result CSV I/O |
+| `parallel.py` | `parallel_map` — parallelizes independent tasks over `ProcessPoolExecutor` |
+| `progress.py` | `DockProgress` / `RefineProgress` — one printed line per completed task |
+| `pipeline.py` | high-level functions chaining prep -> docking -> MD refinement |
+| `cli.py` | `dd_docking-prep` / `dd_docking-dock` / `dd_docking-refine` commands |
 
-## 制約と拡張の可能性
+## Limitations and possible extensions
 
-- フレキシブル残基は共結晶リガンドからの距離のみで選ばれる。induced fit
-  への関与が既知の特定残基を固定したい場合は、`pocket.find_pocket_residues`
-  を経由せず、flexres文字列を直接 `ensemble.prepare_ensemble_member` に
-  渡すこと。
-- MD精密化のデフォルトは短時間・CPUのみ・暗黙溶媒（GBn2）シミュレーション
-  である。明示溶媒やGPUベースの自由エネルギー計算はスコープ外
-  （必要であれば `refine_md.py` を独立して拡張すること）。
-- `screening.py` は全ての `(ligand, member)` の組み合わせにわたって並列化
-  するため、Vinaのグリッドマップはタスクごとに再計算される。大規模な
-  ライブラリでは、各メンバーのグリッドマップを一度だけ計算して再利用する
-  （メンバー単位で並列化する）方が最適化として有効だろう。
+- Flexible residues are chosen purely by distance from the co-crystallized
+  ligand. To pin specific residues known to be involved in induced fit,
+  bypass `pocket.find_pocket_residues` and pass a flexres string directly to
+  `ensemble.prepare_ensemble_member`.
+- MD refinement defaults to a short, CPU-only, implicit-solvent (GBn2)
+  simulation; explicit solvent or GPU-based free-energy calculations are out
+  of scope (extend `refine_md.py` independently if needed).
+- `screening.py` parallelizes over all `(ligand, member)` combinations, so
+  Vina's grid map is recomputed per task. For large libraries, computing each
+  member's grid map once and reusing it (parallelizing per member instead)
+  would be a worthwhile optimization.
 
-## ライセンス
+## License
 
-MIT — [LICENSE](LICENSE) を参照。
+MIT — see [LICENSE](LICENSE).
