@@ -23,7 +23,8 @@
 ## インストール
 
 vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, mdtraj
-が必要。これらはconda-forge経由でのインストールが最善である。
+が必要（`pyproject.toml`の`dependencies`に明記済み）。これらはconda-forge
+経由でのインストールが最善である。
 
 ```bash
 conda create -n dd_docking-env python=3.10 -c conda-forge \

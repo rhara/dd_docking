@@ -19,7 +19,8 @@ target or ligand set (same philosophy as `dd_overlay` / `dd_confgen` / `dd_viewe
 ## Installation
 
 Requires vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit,
-and mdtraj. These are best installed via conda-forge:
+and mdtraj (now declared in `pyproject.toml`'s `dependencies`). These are
+best installed via conda-forge:
 
 ```bash
 conda create -n dd_docking-env python=3.10 -c conda-forge \
