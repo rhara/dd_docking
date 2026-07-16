@@ -1,5 +1,3 @@
-[English version](README.en.md)
-
 # dd_docking
 
 バーチャルスクリーニング向けの、induced-fit様のポケットダイナミクスを備えた

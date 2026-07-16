@@ -1,3 +1,5 @@
+[Japanese version](README.jp.md)
+
 # dd_docking
 
 An ensemble docking toolkit with induced-fit-style pocket dynamics for
