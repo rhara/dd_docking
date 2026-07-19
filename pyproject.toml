@@ -1,7 +1,7 @@
 [project]
 name = "dd_docking"
 version = "0.1.0"
-description = "Ensemble docking toolkit with flexible-side-chain sampling and MD-based induced-fit rescoring"
+description = "Flexible-pocket ensemble docking: MD-verified induced fit, GPU-accelerated at scale"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
