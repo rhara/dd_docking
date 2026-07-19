@@ -44,7 +44,7 @@ def _dock_task(task) -> Tuple[str, str, Optional[float], Optional[str]]:
         return ligand_id, member.member_id, None, None
 
     result = None
-    if gpu_backend.resolve_backend(backend, member.size) == "gpu":
+    if gpu_backend.resolve_backend(backend, member.size, has_flex=member.flex_pdbqt is not None) == "gpu":
         result = gpu_backend.dock_ligand_gpu(
             member.rigid_pdbqt, pdbqt, member.center, member.size,
             flex_pdbqt=member.flex_pdbqt, seed=seed, n_poses=n_poses,

@@ -1,9 +1,11 @@
 """Optional GPU docking backend: Vina-GPU+ (DeltaGroupNJUPT/Vina-GPU-2.0),
 built and installed by `scripts/build_vina_gpu.sh`.
 
-Linux-only. `resolve_backend` is the single place that decides whether a
-given docking task can/should run on the GPU; everything else (macOS,
-Windows, no binary installed, or a docking box too large for the OpenCL
+Linux-only, and rigid-receptor-only: Vina-GPU+ has no support at all for
+flexible side chains (see `resolve_backend`'s docstring). `resolve_backend`
+is the single place that decides whether a given docking task can/should
+run on the GPU; everything else (macOS, Windows, no binary installed, a
+member with flexible residues, or a docking box too large for the OpenCL
 kernel's fixed limit) transparently falls back to the CPU QuickVina2 backend
 in `docking.py`, so callers never need their own platform checks.
 """
@@ -63,17 +65,34 @@ def _warn_once(key: str, message: str) -> None:
         warnings.warn(message, stacklevel=3)
 
 
-def resolve_backend(requested: str, size: Sequence[float]) -> str:
+def resolve_backend(requested: str, size: Sequence[float], *, has_flex: bool = False) -> str:
     """Decide "cpu" or "gpu" for a docking box of the given `size`.
 
     `requested` is "cpu" (always CPU), "gpu" (GPU if at all possible, else
     warn once and fall back to CPU), or "auto" (GPU if available and the
     box fits the kernel's size limit, else CPU silently).
+
+    `has_flex` must be True if this member has any flexible side chains --
+    Vina-GPU+'s `main_procedure_cl.cpp` asserts `m.num_other_pairs() == 0`,
+    which is nonzero for any ligand-flex/flex-flex/flex-inflex interaction,
+    so it only ever supports fully rigid receptors. This is a hard limit of
+    the tool itself (not a box-size or driver issue), so it's checked first
+    and unconditionally routes to CPU.
     """
     if requested not in ("auto", "cpu", "gpu"):
         raise ValueError(f"resolve_backend: unknown backend {requested!r}")
 
     if requested == "cpu":
+        return "cpu"
+
+    if has_flex:
+        if requested == "gpu":
+            _warn_once(
+                "gpu-no-flex-support",
+                "dd_docking: --backend gpu requested but this ensemble member has "
+                "flexible side chains -- Vina-GPU+ only supports rigid receptors "
+                "(it asserts num_other_pairs() == 0) -- falling back to CPU (QuickVina2).",
+            )
         return "cpu"
 
     if not gpu_binary_available():
@@ -132,6 +151,15 @@ def dock_ligand_gpu(
     """
     d = install_dir()
     binary = d / BIN_NAME
+    # The subprocess's cwd is forced to `d` below (Kernel*_Opt.bin are
+    # resolved relative to cwd, not the binary's location), so a relative
+    # rigid_pdbqt/flex_pdbqt from the caller -- e.g. manifest.json entries
+    # are written relative to the ensemble output dir in every CLI example
+    # in the README -- would otherwise resolve against the wrong directory
+    # and silently fail to open.
+    rigid_pdbqt = str(Path(rigid_pdbqt).resolve())
+    if flex_pdbqt:
+        flex_pdbqt = str(Path(flex_pdbqt).resolve())
 
     with tempfile.TemporaryDirectory(prefix="dd_docking_gpu_") as tmp:
         tmp_path = Path(tmp)

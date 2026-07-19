@@ -38,42 +38,64 @@ pip install -e .
 This installs three console commands: `dd_docking-prep`, `dd_docking-dock`,
 `dd_docking-refine`.
 
-### Optional: GPU-accelerated docking (Linux only)
+### Optional: GPU-accelerated docking (Linux only, rigid receptors only)
 
 `dd_docking-dock` can use [Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)
-instead of CPU QuickVina2 for a given docking task, when it's built and the
-task's box fits the OpenCL kernel's size limit. This is Linux-only; on
-macOS/Windows (or on Linux without the binary built), `dd_docking-dock`
-transparently uses CPU QuickVina2 — no code changes needed, this is purely a
-runtime fallback (see `--backend` below).
+instead of CPU QuickVina2 for a given docking task, when it's built, the
+member has no flexible side chains, and the task's box fits the OpenCL
+kernel's size limit. This is Linux-only; on macOS/Windows (or on Linux
+without the binary built, or for a member with flexible residues, or a box
+that's too large), `dd_docking-dock` transparently uses CPU QuickVina2 — no
+code changes needed, this is purely a runtime fallback (see `--backend`
+below).
 
 ```bash
 mamba activate dd_docking
 bash scripts/build_vina_gpu.sh
 ```
 
-This clones and builds Vina-GPU+ from source (pinned commit) into
-`third_party/` (not checked into this repo) and installs the resulting
+This clones Vina-GPU+ from source (pinned commit) into `third_party/` (not
+checked into this repo), **patches a handful of real upstream OpenCL-C bugs**
+in its kernel source (see below), builds it, and installs the resulting
 binary + kernel files into `$CONDA_PREFIX/share/dd_docking/vina-gpu/`.
 Requires an NVIDIA/AMD GPU with a working OpenCL runtime (check with
 `clinfo`) — on NVIDIA this normally comes from the driver/CUDA toolkit
-install. See `scripts/build_vina_gpu.sh` for the AMD (`GPU_PLATFORM`) and
-custom OpenCL path (`DD_DOCKING_OPENCL_PATH`) overrides.
+install. See `scripts/build_vina_gpu.sh` for the AMD (`GPU_PLATFORM`), custom
+OpenCL path (`DD_DOCKING_OPENCL_PATH`), and OpenCL-C version
+(`DD_DOCKING_OPENCL_VERSION`) overrides.
 
-Known limitation of the Vina-GPU+ kernel: the docking box must be under 30 Å
-in every dimension. `dd_docking` checks this per ensemble member and falls
-back to CPU automatically for members whose box is too large — see
-`--backend` in the docking section below.
+**Hard limitation, not fixable by patching: Vina-GPU+ only supports rigid
+receptors.** `main_procedure_cl.cpp` asserts `m.num_other_pairs() == 0`
+before docking, and that count is nonzero for *any* ligand-flex, flex-flex,
+or flex-inflex interaction — i.e. as soon as a single flexible side chain is
+in play. Since `dd_docking`'s ensemble docking always uses flexible side
+chains, `--backend gpu`/`auto` will still use CPU QuickVina2 for those tasks
+(with a one-time warning if you explicitly asked for `gpu`); only a member
+prepared with zero flexible residues can actually run on the GPU here.
 
-Some GPU/driver combinations also hit an unresolved upstream OpenCL kernel
-build bug at runtime even after a successful build (`CL_BUILD_PROGRAM_FAILURE`
-or a crash while compiling the kernel — see upstream issues
+Earlier versions of this README reported Vina-GPU+ as simply broken on this
+project's GTX 1660 Ti (`CL_BUILD_PROGRAM_FAILURE` / a crash while compiling
+the kernel, matching upstream issues
 [#1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/1) and
-[#26](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/26); reproduced
-on this project's GTX 1660 Ti). `dd_docking` detects a failed GPU docking
-task and automatically retries it on CPU with a one-time warning, so results
-stay correct either way — but GPU acceleration itself may simply not be
-usable on some hardware.
+[#26](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/26)). The actual
+root cause: `clinfo` reports this device's real OpenCL C compiler level as
+1.2 even though the *platform* advertises OpenCL 3.0, and Vina-GPU+'s kernel
+source has several real type errors (a redundant address-of that turns a row
+pointer into the wrong pointer type, two pointers missing their `__global`
+address-space qualifier, and a call to `get_global_linear_id()`, which is
+OpenCL ≥2.0 only) that a strict 1.2/2.0 compile correctly rejects, but that
+NVIDIA's more lenient OpenCL-3.0 compile path tolerates just long enough to
+segfault or fail at the program-binary stage instead. `build_vina_gpu.sh` now
+patches these before building and defaults to `-DOPENCL_1_2`, which builds
+and runs correctly on this hardware. Measured after the fix, rigid-receptor
+GPU docking is genuinely faster than CPU once there's enough work to amortize
+GPU/subprocess startup cost -- 8 ligands at `--exhaustiveness 32`: **16.2s on
+GPU vs. 35.2s on CPU** (~2.2x) -- but *slower* for a single cheap task (one
+ligand at `--exhaustiveness 8`: 3.2s GPU vs. 2.3s CPU), so don't expect a win
+for small jobs. If your GPU/driver's OpenCL C compiler genuinely supports
+2.0/3.0, `DD_DOCKING_OPENCL_VERSION=-DOPENCL_3_0` may build a faster kernel;
+these patches are correctness fixes independent of that choice, so they're
+applied either way.
 
 ## Usage
 
@@ -134,9 +156,11 @@ side chain's movable atoms outside the search space, and Vina then reports
 for every ligand docked against that member. ER-alpha's flexible residues
 happen to spread fairly wide around its elongated pocket, so these three
 members end up with boxes of ~25-33 Å per side even at the default padding
-(note this is right up against Vina-GPU+'s 30 Å OpenCL kernel limit --
-`--backend auto/gpu` falls back to CPU for `1xpc`/`1yim` here, see
-[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)).
+(`1xpc`/`1yim` are actually right up against Vina-GPU+'s separate 30 Å
+OpenCL kernel limit too, but it's moot here: all three members have
+flexible side chains, so `--backend auto/gpu` always uses CPU QuickVina2
+for this dataset regardless of box size -- see
+[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only-rigid-receptors-only)).
 
 Python API:
 
@@ -256,7 +280,7 @@ Key options:
 | `--seed` | `0` | random seed (embedding and docking) |
 | `--top-n` | all | keep only the top N results |
 | `--n-jobs` | `1` | parallel workers, one per `(ligand, member)` task (`<=0` for all cores) |
-| `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member's box fits its <30 Å OpenCL kernel limit, else CPU QuickVina2; `cpu` always uses CPU QuickVina2 (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)) |
+| `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member has no flexible side chains and its box fits the <30 Å OpenCL kernel limit, else CPU QuickVina2; `cpu` always uses CPU QuickVina2 (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only-rigid-receptors-only)) |
 | `--no-progress` | - | suppress progress log |
 
 **`--n-jobs` behavior and CPU allocation**: `--n-jobs 1` (default) runs
@@ -355,7 +379,7 @@ Key options:
 
 `--platform` only applies to `dd_docking-refine`'s MD step; docking's own
 GPU option is `dd_docking-dock --backend` (see
-[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)).
+[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only-rigid-receptors-only)).
 
 Python API:
 

@@ -81,12 +81,48 @@ fi
 
 BUILD_DIR="$VINA_GPU_SRC/Vina-GPU+"
 
-# --- 3. Point the Makefile at our Boost build and the system OpenCL
+# --- 3. Patch upstream OpenCL-C bugs in the kernel source. These are real
+#        type errors (a redundant address-of that turns a row pointer into
+#        a pointer-to-array, two pointers missing their __global address
+#        space qualifier, and a call to get_global_linear_id() which is
+#        OpenCL >=2.0 only) that NVIDIA's lenient OpenCL-3.0 compile path
+#        happens to tolerate -- and then either segfaults while compiling
+#        the kernel, or fails to reload the resulting program binary with
+#        CL_BUILD_PROGRAM_FAILURE (reproduced on this project's GTX 1660
+#        Ti / driver 560.35.05, whose OpenCL C compiler is natively 1.2 --
+#        see `clinfo`'s "Device OpenCL C Version"). Fixing them is what
+#        makes rigid-receptor GPU docking actually work here; see
+#        DeltaGroupNJUPT/Vina-GPU-2.0 issues #1 and #26 for the same
+#        symptom reported by others. Idempotent: skipped if already patched.
+KERNEL1="$BUILD_DIR/OpenCL/src/kernels/kernel1.cl"
+QUASI_NEWTON="$BUILD_DIR/OpenCL/src/kernels/quasi_newton.cpp"
+KERNEL2="$BUILD_DIR/OpenCL/src/kernels/kernel2.cl"
+if ! grep -q "a_coords\[3\]" "$KERNEL1"; then
+  log "Patching upstream OpenCL-C kernel bugs..."
+  sed -i 's/address = &(ar->relation\[temp\]);/address = ar->relation[temp];/' "$KERNEL1"
+  sed -i 's/const atom_cl\* a = &pa->atoms\[i\];/const __global atom_cl* a = \&pa->atoms[i];/' "$KERNEL1"
+  sed -i '/const float r2 = vec_distance_sqr(a->coords, probe_coords);/i\
+		const float a_coords[3] = { a->coords[0], a->coords[1], a->coords[2] };' "$KERNEL1"
+  sed -i 's/vec_distance_sqr(a->coords, probe_coords)/vec_distance_sqr(a_coords, probe_coords)/' "$KERNEL1"
+  sed -i -E 's/const[[:space:]]+mis_cl\*([[:space:]]+)mis,/const __global mis_cl*\1mis,/' "$QUASI_NEWTON"
+  sed -i 's/int gl = get_global_linear_id();/int gl = gy * gs + gx; \/\/ get_global_linear_id() needs OpenCL >=2.0/' "$KERNEL2"
+else
+  log "Kernel source already patched, skipping."
+fi
+
+# --- 4. Point the Makefile at our Boost build and the system OpenCL
 #        (NVIDIA's OpenCL headers/libs live under the CUDA toolkit install;
 #        AMD users should instead point OPENCL_LIB_PATH at their driver's
-#        OpenCL install and set GPU_PLATFORM=-DAMD_PLATFORM below).
+#        OpenCL install and set GPU_PLATFORM=-DAMD_PLATFORM below). Default
+#        to OpenCL C 1.2 -- the patches above make the kernel build cleanly
+#        under 1.2/2.0/3.0, and 1.2 is the most portable (it's this
+#        project's dev GPU's *actual* OpenCL C compiler level per `clinfo`,
+#        even though the platform itself advertises "OpenCL 3.0"). Override
+#        with DD_DOCKING_OPENCL_VERSION=-DOPENCL_3_0 (or _2_0) if your
+#        device's OpenCL C compiler genuinely supports it and you want it.
 OPENCL_LIB_PATH="${DD_DOCKING_OPENCL_PATH:-/usr/local/cuda}"
 GPU_PLATFORM="${DD_DOCKING_GPU_PLATFORM:--DNVIDIA_PLATFORM}"
+OPENCL_VERSION="${DD_DOCKING_OPENCL_VERSION:--DOPENCL_1_2}"
 
 if [[ ! -f "$OPENCL_LIB_PATH/include/CL/cl.h" ]]; then
   log "ERROR: no OpenCL headers found at $OPENCL_LIB_PATH/include/CL/cl.h. Set DD_DOCKING_OPENCL_PATH to your CUDA toolkit / OpenCL SDK root."
@@ -96,24 +132,24 @@ fi
 sed -i \
   -e "s|^BOOST_LIB_PATH=.*|BOOST_LIB_PATH=$BOOST_DIR|" \
   -e "s|^OPENCL_LIB_PATH=.*|OPENCL_LIB_PATH=$OPENCL_LIB_PATH|" \
-  -e "s|^OPENCL_VERSION=.*|OPENCL_VERSION=-DOPENCL_3_0|" \
+  -e "s|^OPENCL_VERSION=.*|OPENCL_VERSION=$OPENCL_VERSION|" \
   -e "s|^GPU_PLATFORM=.*|GPU_PLATFORM=$GPU_PLATFORM|" \
   "$BUILD_DIR/Makefile"
 
-# --- 4. Build, in two passes per upstream's documented workflow:
+# --- 5. Build, in two passes per upstream's documented workflow:
 #        `make source` first compiles the OpenCL kernels from source and
 #        produces Kernel1_Opt.bin/Kernel2_Opt.bin; then plain `make`
 #        rebuilds the binary to *load* those .bin files at startup instead
 #        of recompiling the kernel every run (much faster startup).
 #
-#        Note: some GPU/driver combinations hit an unresolved upstream
-#        OpenCL kernel build bug at runtime regardless of this build
-#        succeeding (CL_BUILD_PROGRAM_FAILURE / a crash while compiling the
-#        kernel -- see DeltaGroupNJUPT/Vina-GPU-2.0 issues #1 and #26,
-#        reproduced on this project's GTX 1660 Ti). dd_docking's
-#        gpu_backend.py falls back to CPU vina automatically if a task
-#        fails on the GPU, so a run stays correct either way, but GPU
-#        acceleration itself may simply not work on some hardware.
+#        Note: Vina-GPU+ only supports *rigid*-receptor docking -- its
+#        main_procedure_cl.cpp asserts `m.num_other_pairs() == 0`, and
+#        that count is nonzero whenever any flexible side chain is in
+#        play (ligand-flex/flex-flex/flex-inflex pairs all count as
+#        "other"). dd_docking's ensemble docking always uses flexible
+#        side chains, so `--backend gpu/auto` still uses CPU QuickVina2
+#        for those tasks; only a member prepared with no flexible
+#        residues at all can actually run on the GPU here.
 log "Building Vina-GPU+ (ulimit -s 8192, as required by upstream)..."
 (
   cd "$BUILD_DIR"
@@ -130,7 +166,7 @@ if [[ ! -f "$BUILD_DIR/$BIN_NAME" || ! -f "$BUILD_DIR/Kernel1_Opt.bin" || ! -f "
   exit 1
 fi
 
-# --- 5. Install binary + kernel binaries together: Vina-GPU+ resolves
+# --- 6. Install binary + kernel binaries together: Vina-GPU+ resolves
 #        Kernel1_Opt.bin/Kernel2_Opt.bin relative to its *working directory*
 #        at runtime, so they must stay next to each other, and dd_docking's
 #        gpu_backend.py always runs the binary with this directory as cwd.

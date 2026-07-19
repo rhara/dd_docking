@@ -37,43 +37,67 @@ pip install -e .
 これにより3つのコンソールコマンドがインストールされる: `dd_docking-prep`,
 `dd_docking-dock`, `dd_docking-refine`。
 
-### オプション: GPUアクセラレーションドッキング（Linux限定）
+### オプション: GPUアクセラレーションドッキング（Linux限定、リジッド受容体限定）
 
 `dd_docking-dock`は、CPU版QuickVina2の代わりに
 [Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)を使用できる
-（ビルド済みで、かつタスクのボックスサイズがOpenCLカーネルの制限に収まる
-場合）。これはLinux限定の機能であり、macOS/Windows（またはバイナリを
-ビルドしていないLinux）では、`dd_docking-dock`は自動的にCPU版QuickVina2に
-フォールバックする——コードの変更は不要で、純粋にランタイムのフォール
-バックである（後述の`--backend`を参照）。
+（ビルド済みで、対象メンバーにフレキシブル側鎖が無く、かつタスクの
+ボックスサイズがOpenCLカーネルの制限に収まる場合）。これはLinux限定の
+機能であり、macOS/Windows（またはバイナリをビルドしていないLinux、
+フレキシブル残基を持つメンバー、大きすぎるボックス）では、
+`dd_docking-dock`は自動的にCPU版QuickVina2にフォールバックする——コードの
+変更は不要で、純粋にランタイムのフォールバックである（後述の
+`--backend`を参照）。
 
 ```bash
 mamba activate dd_docking
 bash scripts/build_vina_gpu.sh
 ```
 
-このスクリプトはVina-GPU+のソースを（固定コミットで）クローン・ビルドし
-（`third_party/`配下、本リポジトリにはコミットしない）、生成された
-バイナリとカーネルファイルを`$CONDA_PREFIX/share/dd_docking/vina-gpu/`に
-インストールする。動作するOpenCLランタイムを持つNVIDIA/AMD GPUが必要
-（`clinfo`で確認可能）——NVIDIAの場合は通常ドライバ/CUDA toolkitの
-インストールに含まれる。AMD向け（`GPU_PLATFORM`）やOpenCLパスのカスタム
-指定（`DD_DOCKING_OPENCL_PATH`）は`scripts/build_vina_gpu.sh`を参照。
+このスクリプトはVina-GPU+のソースを（固定コミットで）クローンし
+（`third_party/`配下、本リポジトリにはコミットしない）、**カーネル
+ソースに実在するOpenCL Cの不具合をいくつかパッチしてから**（後述）
+ビルドし、生成されたバイナリとカーネルファイルを
+`$CONDA_PREFIX/share/dd_docking/vina-gpu/`にインストールする。動作する
+OpenCLランタイムを持つNVIDIA/AMD GPUが必要（`clinfo`で確認可能）——
+NVIDIAの場合は通常ドライバ/CUDA toolkitのインストールに含まれる。
+AMD向け（`GPU_PLATFORM`）、OpenCLパスのカスタム指定
+（`DD_DOCKING_OPENCL_PATH`）、OpenCL Cバージョンの指定
+（`DD_DOCKING_OPENCL_VERSION`）は`scripts/build_vina_gpu.sh`を参照。
 
-Vina-GPU+カーネルの既知の制約: ドッキングボックスは各辺30Å未満である
-必要がある。`dd_docking`はアンサンブルメンバーごとにこれをチェックし、
-ボックスが大きすぎるメンバーについては自動的にCPUにフォールバックする
-——後述のドッキングセクションの`--backend`を参照。
+**修正不可能な根本的制約: Vina-GPU+はリジッド受容体しかサポートしない。**
+`main_procedure_cl.cpp`はドッキング前に`m.num_other_pairs() == 0`という
+アサーションを持つが、この値はligand-flex・flex-flex・flex-inflexの
+相互作用が1つでもあれば非ゼロになる——つまりフレキシブル側鎖が1つでも
+あれば即座に満たされない。`dd_docking`のアンサンブルドッキングは常に
+フレキシブル側鎖を使うため、`--backend gpu`/`auto`はそれらのタスクでは
+常にCPU版QuickVina2を使う（`gpu`を明示指定した場合は1回だけ警告する）。
+フレキシブル残基が0のメンバーのみが実際にGPUで動作する。
 
-一部のGPU/ドライバの組み合わせでは、ビルド自体が成功していても
-ランタイムでOpenCLカーネルのビルドに失敗する未解決の上流バグに遭遇する
-（`CL_BUILD_PROGRAM_FAILURE`、またはカーネルコンパイル中のクラッシュ
-——upstreamの[Issue #1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/1)
+以前のこのREADMEでは、Vina-GPU+は本プロジェクトのGTX 1660 Tiでは単純に
+動作しない（`CL_BUILD_PROGRAM_FAILURE`、あるいはカーネルコンパイル中の
+クラッシュ——upstreamの[Issue #1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/1)
 と[Issue #26](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/26)
-参照。本プロジェクトのGTX 1660 Tiでも再現した）。`dd_docking`はGPU側の
-ドッキングタスク失敗を検知すると、1回だけ警告を出しつつ自動的にCPUで
-再試行するため、結果は常に正しく得られる——ただし、ハードウェアによっては
-GPUアクセラレーション自体が使えない場合がある。
+と同じ症状）と報告していた。実際の根本原因: `clinfo`はこのデバイスの
+実際のOpenCL Cコンパイラレベルが1.2であることを示している（*プラット
+フォーム*自体はOpenCL 3.0対応と表示するにもかかわらず）。Vina-GPU+の
+カーネルソースには実際の型エラーが複数存在する（行ポインタを誤った
+ポインタ型に変換する冗長な`&`、`__global`アドレス空間修飾子が欠けている
+ポインタ2箇所、そしてOpenCL 2.0以降専用の`get_global_linear_id()`の呼び出し）。
+これらは厳格な1.2/2.0コンパイルでは正しく拒否されるが、NVIDIAのより緩い
+OpenCL 3.0コンパイルパスでは（プログラムバイナリの段階でセグフォルトや
+失敗を起こすまでの間だけ）通ってしまう。`build_vina_gpu.sh`は今これらを
+ビルド前にパッチし、デフォルトを`-DOPENCL_1_2`にしており、この環境では
+正しくビルド・動作する。修正後の実測では、GPU/subprocess起動コストを
+償却できるだけの作業量があれば、リジッド受容体のGPUドッキングは実際に
+CPUより速くなる——8リガンドを`--exhaustiveness 32`でドッキングした場合:
+**GPUで16.2秒、CPUで35.2秒**（約2.2倍）。ただし単発の軽いタスクでは逆に
+遅くなる（1リガンド・`--exhaustiveness 8`: GPU 3.2秒 vs CPU 2.3秒）ため、
+小さなジョブでの高速化は期待しないこと。お使いのGPU/ドライバのOpenCL C
+コンパイラが本当に2.0/3.0に対応しているなら、
+`DD_DOCKING_OPENCL_VERSION=-DOPENCL_3_0`でより速いカーネルがビルドできる
+かもしれない——これらのパッチはそのバージョン選択とは独立した正しさの
+修正なので、どちらを選んでも適用される。
 
 ## 使い方
 
@@ -133,7 +157,10 @@ ERα試験データ（3ERT/1XPC/1YIM、共結晶リガンドから5 Åのカッ�
 search space」というエラーを出し、そのメンバーに対するすべてのリガンドで
 ポーズが0件になることがある。ERαのフレキシブル残基は伸長したポケットの
 周囲に比較的広く分布しているため、既定のパディングでもこの3メンバーは
-ボックスが各辺25〜33Å程度になる。
+ボックスが各辺25〜33Å程度になる（`1xpc`/`1yim`はVina-GPU+の別枠の30Å
+OpenCLカーネル制限にも実際に引っかかっているが、ここでは無関係——3メンバー
+とも全てフレキシブル側鎖を持つため、`--backend auto/gpu`はこのデータセット
+では常にCPU版QuickVina2を使う。[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定リジッド受容体限定)を参照）。
 
 Python API:
 
@@ -249,7 +276,7 @@ decoy（順位13〜15、アフィニティ-9.0〜-8.3）は、他のすべて（
 | `--seed` | `0` | 乱数シード（埋め込みおよびドッキング） |
 | `--top-n` | 全件 | 上位N件の結果のみ保持 |
 | `--n-jobs` | `1` | `(ligand, member)` タスクごとの並列ワーカー数（`<=0`で全コア使用） |
-| `--backend` | `auto` | ドッキングエンジン: `auto`はビルド済みかつメンバーのボックスがVina-GPU+の30Å未満制限に収まる場合にそれを使用、それ以外はCPU版QuickVina2。`cpu`は常にCPU版QuickVina2（全OSで動作）。`gpu`はVina-GPU+を優先し、使えないメンバーではCPUに警告付きでフォールバックする（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照） |
+| `--backend` | `auto` | ドッキングエンジン: `auto`はビルド済みかつメンバーのボックスがVina-GPU+の30Å未満制限に収まる場合にそれを使用、それ以外はCPU版QuickVina2。`cpu`は常にCPU版QuickVina2（全OSで動作）。`gpu`はVina-GPU+を優先し、使えないメンバーではCPUに警告付きでフォールバックする（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定リジッド受容体限定)を参照） |
 | `--no-progress` | - | 進捗ログを抑制 |
 
 **`--n-jobs` の挙動とCPU割り当て**: `--n-jobs 1`（デフォルト）は逐次実行
@@ -349,7 +376,7 @@ DUD-Eの「decoy」はChEMBLに活性が報告されていないというだけ�
 
 `--platform` はMDステップ（`dd_docking-refine`）にのみ適用される。
 ドッキング自体のGPUオプションは`dd_docking-dock --backend`である
-（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照）。
+（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定リジッド受容体限定)を参照）。
 
 Python API:
 

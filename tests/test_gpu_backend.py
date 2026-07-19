@@ -7,6 +7,7 @@ this machine. The real subprocess path (`dock_ligand_gpu`) is exercised
 manually / in CI only where a built binary is present.
 """
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +57,17 @@ def test_gpu_requested_with_oversized_box_warns_and_falls_back(monkeypatch):
         assert gpu_backend.resolve_backend("gpu", [10, 40, 10]) == "cpu"
 
 
+def test_auto_falls_back_to_cpu_for_flexible_member(monkeypatch):
+    monkeypatch.setattr(gpu_backend, "gpu_binary_available", lambda: True)
+    assert gpu_backend.resolve_backend("auto", [10, 10, 10], has_flex=True) == "cpu"
+
+
+def test_gpu_requested_with_flex_warns_and_falls_back(monkeypatch):
+    monkeypatch.setattr(gpu_backend, "gpu_binary_available", lambda: True)
+    with pytest.warns(UserWarning, match="flexible side chains"):
+        assert gpu_backend.resolve_backend("gpu", [10, 10, 10], has_flex=True) == "cpu"
+
+
 def test_gpu_binary_unavailable_off_linux(monkeypatch):
     monkeypatch.setattr(gpu_backend.platform, "system", lambda: "Darwin")
     assert gpu_backend.gpu_binary_available() is False
@@ -64,6 +76,35 @@ def test_gpu_binary_unavailable_off_linux(monkeypatch):
 def test_resolve_backend_rejects_unknown_value():
     with pytest.raises(ValueError):
         gpu_backend.resolve_backend("quantum", [10, 10, 10])
+
+
+def test_dock_ligand_gpu_resolves_relative_receptor_paths(monkeypatch, tmp_path):
+    # dock_ligand_gpu forces subprocess cwd to install_dir() (Kernel*_Opt.bin
+    # are resolved relative to cwd, not the binary's own location), so a
+    # relative rigid_pdbqt/flex_pdbqt -- as written into manifest.json by
+    # every CLI example in the README -- must be made absolute first, or it
+    # silently resolves against the wrong directory instead of the caller's.
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / gpu_backend.BIN_NAME).write_text("")
+    monkeypatch.setattr(gpu_backend, "install_dir", lambda: install)
+    monkeypatch.setattr(gpu_backend, "_raise_stack_limit", lambda: None)
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        raise FileNotFoundError  # short-circuit before actually exec'ing
+
+    monkeypatch.setattr(gpu_backend.subprocess, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "rigid.pdbqt").write_text("")
+
+    gpu_backend.dock_ligand_gpu("rigid.pdbqt", "LIGAND", [0, 0, 0], [10, 10, 10])
+
+    receptor_arg = captured["args"][captured["args"].index("--receptor") + 1]
+    assert Path(receptor_arg).is_absolute()
+    assert receptor_arg == str(tmp_path / "rigid.pdbqt")
 
 
 def test_warn_gpu_task_failed_warns_once():
