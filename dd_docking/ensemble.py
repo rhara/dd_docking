@@ -74,10 +74,15 @@ def prepare_ensemble_member(raw_pdb: Path, member_id: str, out_dir: Path, *,
             "cannot determine the docking box/pocket residues"
         )
 
-    center, size = pocket.compute_box(ligand_lines, padding=box_padding)
     ref_coords = pocket.ligand_lines_to_coords(ligand_lines)
     residues = pocket.find_pocket_residues(fixed_pdb, ref_coords, cutoff=pocket_cutoff, max_residues=max_flexres)
     flexres_str = pocket.format_flexres(residues)
+
+    # Box must cover the flexible side chains' movable atoms too, not just
+    # the ligand -- otherwise Vina finds them "outside the search space"
+    # and returns no poses at all (see `compute_box`'s docstring).
+    flex_coords = pocket.residue_coords(Path(fixed_pdb).read_text(), residues)
+    center, size = pocket.compute_box(ligand_lines, padding=box_padding, extra_coords=flex_coords)
 
     rigid_pdbqt, flex_pdbqt = receptor_to_pdbqt(
         fixed_pdb, center, size, out_dir / member_id,

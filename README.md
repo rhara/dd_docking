@@ -86,18 +86,18 @@ co-crystallized ligand's coordinates.
 
 ```bash
 dd_docking-prep \
-  --member 6w63 data/raw/6W63.pdb X77 \
-  --member 7l11 data/raw/7L11.pdb XF1 \
-  --member 7l10 data/raw/7L10.pdb XEY \
+  --member 3ert data/raw/3ERT.pdb OHT \
+  --member 1xpc data/raw/1XPC.pdb AIT \
+  --member 1yim data/raw/1YIM.pdb CM4 \
   -o data/ensemble
 ```
 
 Output (measured, reproducible from the `data/` in this repository):
 
 ```
-6w63: 27 flexible residues -> data/ensemble/6w63_rigid.pdbqt
-7l11: 24 flexible residues -> data/ensemble/7l11_rigid.pdbqt
-7l10: 20 flexible residues -> data/ensemble/7l10_rigid.pdbqt
+3ert: 10 flexible residues -> data/ensemble/3ert_rigid.pdbqt
+1xpc: 10 flexible residues -> data/ensemble/1xpc_rigid.pdbqt
+1yim: 10 flexible residues -> data/ensemble/1yim_rigid.pdbqt
 
 [done] 3 member(s) -> data/ensemble/manifest.json
 ```
@@ -119,12 +119,24 @@ Key options:
 
 `--max-flexres` defaults to a value chosen from experience: unlike rigid
 docking (a precomputed grid map), each flexible side chain adds a real
-rotational degree of freedom to Vina's search space. On the Mpro test data in
-this repository (6W63/7L11/7L10, 5 Å cutoff from the co-crystallized
-ligand), 20-27 residues fell within the cutoff, and docking one ligand
+rotational degree of freedom to Vina's search space. On the ER-alpha test
+data in this repository (3ERT/1XPC/1YIM, 5 Å cutoff from the co-crystallized
+ligand), 22-26 residues fell within the cutoff, and docking one ligand
 against one member with no cap didn't finish in under an hour. Capping at 10
 (nearest first) brought this down to a practical runtime. Removing the cap or
 widening the cutoff to "be safe" runs into this trap easily.
+
+The docking box itself is sized to cover both the co-crystallized ligand
+*and* every chosen flexible residue's atoms (plus `--box-padding` on top) --
+not just the ligand. A box sized only around the ligand can leave a flexible
+side chain's movable atoms outside the search space, and Vina then reports
+"no conformations completely within the search space" and returns zero poses
+for every ligand docked against that member. ER-alpha's flexible residues
+happen to spread fairly wide around its elongated pocket, so these three
+members end up with boxes of ~25-33 Å per side even at the default padding
+(note this is right up against Vina-GPU+'s 30 Å OpenCL kernel limit --
+`--backend auto/gpu` falls back to CPU for `1xpc`/`1yim` here, see
+[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)).
 
 Python API:
 
@@ -132,9 +144,9 @@ Python API:
 from dd_docking import prepare_ensemble
 
 ensemble = prepare_ensemble(
-    [("6w63", "data/raw/6W63.pdb", "X77"),
-     ("7l11", "data/raw/7L11.pdb", "XF1"),
-     ("7l10", "data/raw/7L10.pdb", "XEY")],
+    [("3ert", "data/raw/3ERT.pdb", "OHT"),
+     ("1xpc", "data/raw/1XPC.pdb", "AIT"),
+     ("1yim", "data/raw/1YIM.pdb", "CM4")],
     "data/ensemble",
 )
 for m in ensemble:
@@ -151,45 +163,76 @@ dd_docking-dock data/ensemble data/ligands.smi \
   -o data/screen --exhaustiveness 4 --n-poses 1 --n-jobs 4
 ```
 
-Work is split into `(ligand, ensemble member)` tasks (8 ligands × 3 members =
-24 tasks in the example above), parallelized via `--n-jobs` (default
+`data/ligands.smi` here is 3 co-crystallized ligands (self-docking checks) +
+3 genuine ER-alpha actives + 9 property-matched decoys, all pulled from
+[DUD-E](https://dude.docking.org/targets/esr1/) (see
+[Test dataset (ER-alpha, DUD-E decoys)](#test-dataset-er-alpha-dud-e-decoys)
+below) -- a much harder,
+more realistic screen than picking a handful of unrelated approved drugs as
+"obviously wrong" decoys.
+
+Work is split into `(ligand, ensemble member)` tasks (15 ligands × 3 members
+= 45 tasks in the example above), parallelized via `--n-jobs` (default
 sequential; `<=0` uses all CPU cores). One progress line is printed per
 ligand once it has been docked against every member (measured on this
-repository's data, 16-core Mac, `--n-jobs 4`, ~8 minutes for 3 native
-compounds + 5 approved drugs):
+repository's data, 16-core Linux box, `--n-jobs 4`, ~29 minutes):
 
 ```
-[parallel] using 4 worker processes for 24 tasks
-[1] X77_native_6w63  best_member=6w63  affinity=-6.837
-[2] XF1_native_7l11  best_member=6w63  affinity=-7.697
-[3] aspirin  best_member=7l11  affinity=-5.210
-[4] XEY_native_7l10  best_member=7l11  affinity=-8.058
-[5] ibuprofen  best_member=7l10  affinity=-5.282
-[6] naproxen  best_member=7l10  affinity=-6.187
-[7] acetaminophen  best_member=6w63  affinity=-4.376
-[8] metformin  best_member=7l11  affinity=-5.539
+[parallel] using 4 worker processes for 45 tasks
+[1] OHT_native_3ert  best_member=1xpc  affinity=-11.300
+[2] AIT_native_1xpc  best_member=3ert  affinity=-11.400
+[3] CM4_native_1yim  best_member=3ert  affinity=-11.700
+[4] CHEMBL215428_active  best_member=1xpc  affinity=-11.700
+[5] CHEMBL31127_active  best_member=1xpc  affinity=-11.300
+[6] CHEMBL385358_active  best_member=1xpc  affinity=-12.100
+[7] C48469840_decoy  best_member=1xpc  affinity=-10.600
+[8] C14244874_decoy  best_member=3ert  affinity=-11.200
+[9] C66896427_decoy  best_member=1yim  affinity=-11.100
+[10] C27846680_decoy  best_member=1xpc  affinity=-11.300
+[11] C37195230_decoy  best_member=1xpc  affinity=-8.600
+[12] C37085981_decoy  best_member=1xpc  affinity=-9.000
+[13] C09495369_decoy  best_member=3ert  affinity=-12.300
+[14] C12776766_decoy  best_member=1xpc  affinity=-11.300
+[15] C36904163_decoy  best_member=1xpc  affinity=-8.300
 
-[done] 8 ligand(s) ranked -> data/screen/ranked_results.csv
+[done] 15 ligand(s) ranked -> data/screen/ranked_results.csv
 ```
 
-Final ranking (`ranked_results.csv`, affinity ascending): the three
-co-crystallized ligands (self-docking) take the top 3 spots, with the 5
-unrelated approved drugs ranked below (the intended discrimination). The
-`best_member` column and per-member `affinity[6w63/7l11/7l10]` columns
-differ across rows, confirming the ensemble's conformations actually produce
-different results (evidence that ensemble docking is functioning as
+Final ranking (`ranked_results.csv`, affinity ascending). Unlike unrelated
+approved drugs, DUD-E's property-matched decoys (similar molecular weight,
+rotatable-bond count, and charge to the real actives, but a different 2-D
+scaffold) are a deliberately hard discrimination test, and this shows in the
+result honestly: the top spot goes to a decoy (`C09495369_decoy`), and
+several other decoys interleave with the real actives/natives through the
+top 12 rows. This isn't a bug — it's the well-documented reality that a
+single low-exhaustiveness AutoDock-family docking pass alone often can't
+perfectly separate property-matched decoys from true actives, which is
+exactly why `dd_docking-refine`'s MD-based induced-fit rescoring exists as a
+second filter (see below). What docking *does* clearly deliver here: the 3
+weakest, most topologically-dissimilar decoys are cleanly separated at the
+bottom (ranks 13-15, affinity -9.0 to -8.3, versus -10.6 or better for
+everything else), and the `best_member` / per-member `affinity[3ert/1xpc/1yim]`
+columns differ across rows, confirming the ensemble's conformations actually
+produce different results (evidence that ensemble docking is functioning as
 intended):
 
-| rank | ligand_id | best_member | best_affinity | affinity[6w63] | affinity[7l11] | affinity[7l10] |
+| rank | ligand_id | best_member | best_affinity | affinity[3ert] | affinity[1xpc] | affinity[1yim] |
 |---|---|---|---|---|---|---|
-| 1 | XEY_native_7l10 | 7l11 | -8.058 | -6.817 | -8.058 | -7.711 |
-| 2 | XF1_native_7l11 | 6w63 | -7.697 | -7.697 | -7.414 | -7.418 |
-| 3 | X77_native_6w63 | 6w63 | -6.837 | -6.837 | -6.773 | -6.554 |
-| 4 | naproxen | 7l10 | -6.187 | -5.102 | -6.020 | -6.187 |
-| 5 | metformin | 7l11 | -5.539 | -5.310 | -5.539 | -5.349 |
-| 6 | ibuprofen | 7l10 | -5.282 | -4.388 | -4.739 | -5.282 |
-| 7 | aspirin | 7l11 | -5.210 | -4.623 | -5.210 | -4.109 |
-| 8 | acetaminophen | 6w63 | -4.376 | -4.376 | -4.022 | -4.355 |
+| 1 | C09495369_decoy | 3ert | -12.3 | -12.3 | -12.2 | -11.4 |
+| 2 | CHEMBL385358_active | 1xpc | -12.1 | -11.5 | -12.1 | -11.6 |
+| 3 | CM4_native_1yim | 3ert | -11.7 | -11.7 | -11.7 | -10.8 |
+| 4 | CHEMBL215428_active | 1xpc | -11.7 | -11.4 | -11.7 | -8.1 |
+| 5 | AIT_native_1xpc | 3ert | -11.4 | -11.4 | -11.3 | -10.8 |
+| 6 | OHT_native_3ert | 1xpc | -11.3 | -10.6 | -11.3 | -10.8 |
+| 7 | CHEMBL31127_active | 1xpc | -11.3 | -10.7 | -11.3 | -10.5 |
+| 8 | C27846680_decoy | 1xpc | -11.3 | -10.7 | -11.3 | -10.7 |
+| 9 | C12776766_decoy | 1xpc | -11.3 | -10.5 | -11.3 | -10.1 |
+| 10 | C14244874_decoy | 3ert | -11.2 | -11.2 | -11.0 | -10.4 |
+| 11 | C66896427_decoy | 1yim | -11.1 | -11.0 | -10.2 | -11.1 |
+| 12 | C48469840_decoy | 1xpc | -10.6 | -9.4 | -10.6 | -10.4 |
+| 13 | C37085981_decoy | 1xpc | -9.0 | -8.2 | -9.0 | -9.0 |
+| 14 | C37195230_decoy | 1xpc | -8.6 | -8.4 | -8.6 | -8.3 |
+| 15 | C36904163_decoy | 1xpc | -8.3 | -7.6 | -8.3 | -8.1 |
 
 Output:
 
@@ -220,13 +263,27 @@ Key options:
 sequentially, giving each docking task all available cores internally
 (`cpu=0`). Any other `--n-jobs` value divides cores evenly across worker
 processes (`cpu_count // n_jobs`, minimum 1). Flexible side-chain docking is
-much heavier than rigid docking and benefits significantly from Vina's own
-multithreading, so the common pattern for lightweight rigid docking — fix
-`--cpu 1` and parallelize jobs instead — backfires badly here (measured: same
-conditions, `cpu=1` fixed took ~850s per task vs. ~150s per task with several
-cores each, about 5.6x). Setting too many workers reduces each worker's core
-share and can also slow things down, so start conservatively (roughly 1/4 to
-1/2 of core count) relative to library size and ensemble size.
+much heavier than rigid docking and benefits significantly from QuickVina2's
+own multithreading, so the common pattern for lightweight rigid docking — fix
+`--cpu 1` and parallelize jobs instead — backfires badly here. Measured on
+this repository's ER-alpha data (one ligand, one member, `--exhaustiveness
+16`, 16-core Linux box), single-task wall time by `--cpu`:
+
+| `--cpu` | wall time | speedup vs. `--cpu 1` |
+|---|---|---|
+| 1 | 827.5s | 1.0x |
+| 2 | 432.4s | 1.9x |
+| 4 | 223.2s | 3.7x |
+| 8 | 118.8s | 7.0x |
+| 16 | 101.5s | 8.2x |
+
+Returns diminish sharply past 8 cores (going from 8 to 16 cores only gains
+~17%), so for a batch of many `(ligand, member)` tasks, splitting the extra
+cores across a couple of parallel `--n-jobs` workers (each still keeping
+several cores via `cpu_count // n_jobs`) tends to use the machine better than
+handing every core to one task at a time. Start conservatively (roughly `--cpu`
+4-8 per task, i.e. `--n-jobs` around `cpu_count // 6`) and adjust from there
+relative to library size and ensemble size.
 
 Python API:
 
@@ -252,26 +309,32 @@ of them) keeps the computational cost practical.
 
 ```bash
 dd_docking-refine data/screen/ranked_results.csv \
-  -o data/screen/refine --top-n 2 --prod-ps 20 --equil-ps 5
+  -o data/screen/refine --top-n 3 --prod-ps 20 --equil-ps 5
 ```
 
 Measured output (`--prod-ps` shortened here for a quick test; use a longer
 value in production):
 
 ```
-[MD XEY_native_7l10] implicit solvent setup failed, retrying in vacuum: ''
-[MD XEY_native_7l10] vacuum  rmsd_mean=1.90  rmsd_final=2.46  stable=True
-[MD XF1_native_7l11] implicit  rmsd_mean=2.67  rmsd_final=3.32  stable=True
+[MD C09495369_decoy] implicit  platform=OpenCL  rmsd_mean=1.41  rmsd_final=1.35  stable=True
+[MD CHEMBL385358_active] implicit  platform=OpenCL  rmsd_mean=0.94  rmsd_final=1.79  stable=True
+[MD CM4_native_1yim] implicit  platform=OpenCL  rmsd_mean=1.48  rmsd_final=1.89  stable=True
 
-[done] 2 hit(s) refined -> data/screen/refine/md_rescore.csv
+[done] 3 hit(s) refined -> data/screen/refine/md_rescore.csv
 ```
 
-The first hit's GBn2 implicit-solvent system setup failed (an occasional,
-apparently transient issue in `openmmforcefields`' force-field template
-generation) and automatically fell back to vacuum MD (this fallback happens
-automatically even without passing `--vacuum`; expected behavior). Both hits
-met the stability criterion (RMSD mean < 3 Å and final < 4 Å) and were
-marked `stable=True`.
+All three top hits -- including the decoy that out-scored every real active
+in docking (`C09495369_decoy`) -- pass the MD stability criterion (RMSD mean
+< 3 Å and final < 4 Å) here, GBn2 implicit solvent setup succeeded for all
+three this run (`--platform` picked OpenCL), and RMSDs stay under 2 Å for
+all three. Rather than editing this to a cleaner-looking result: this is the
+honest, expected outcome of using property-matched decoys, not a bug. A
+DUD-E "decoy" is only presumed inactive (absence of a reported ChEMBL
+activity, not proof of one) — some legitimately sit stably in a compatible
+sub-pocket the same way a real ligand would, which is exactly why the docking
+literature treats property-matched decoy sets as a genuinely hard
+benchmark, and why no single stage of this pipeline (docking or MD) should
+be trusted as a final answer on its own.
 
 `md_rescore.csv` sorts by `stable` (ligand heavy-atom RMSD mean < 3 Å and
 final < 4 Å) first, then by Vina affinity ascending within that. Columns
@@ -318,14 +381,49 @@ df = run_ensemble_docking(
 )
 ```
 
+## Test dataset (ER-alpha, DUD-E decoys)
+
+`data/raw/` and `data/ligands.smi` hold a small but genuinely rigorous
+example, not tied to any particular target -- swap in any protein with
+multiple co-crystallized conformations and a DUD-E (or similar) decoy set:
+
+- **Ensemble members**: 3 human estrogen receptor alpha (ER-alpha) ligand-
+  binding-domain structures, a textbook induced-fit case (agonist vs. SERM
+  ligands reposition helix 12 and reshape the pocket) --
+  [3ERT](https://www.rcsb.org/structure/3ERT) (4-hydroxytamoxifen),
+  [1XPC](https://www.rcsb.org/structure/1XPC) and
+  [1YIM](https://www.rcsb.org/structure/1YIM) (two different SERM
+  scaffolds). All three are wild-type, single-chain, and verified via the
+  RCSB API to have no internal missing-residue gaps in the ligand-binding
+  domain (see the next section for why that check matters) before being
+  chosen.
+- **Ligand library**: each member's own co-crystallized ligand (self-docking
+  check) + 3 genuine ER-alpha actives + 9 property-matched decoys, all
+  pulled from [DUD-E's `esr1` target](https://dude.docking.org/targets/esr1/)
+  and pre-filtered with RDKit for valid, 3D-embeddable SMILES (fixed random
+  seed for reproducibility). DUD-E decoys are chosen to match real actives'
+  molecular weight/rotatable-bond count/charge while differing in 2-D
+  topology -- a far harder discrimination test than unrelated everyday
+  molecules (e.g. approved drugs), which any docking method separates from a
+  real binder trivially.
+
 ## Verified behavior
 
 - Rigid/flex PDBQT files for the 3 ensemble members in `data/ensemble/`
-  (SARS-CoV-2 Mpro, PDB 6W63/7L11/7L10 — genuinely different pocket
-  conformations bound to different inhibitors) dock without issue via
-  `qvina2 --receptor rigid.pdbqt --flex flex.pdbqt ...`.
-- Self-docking each member's co-crystallized ligand discriminates it from
-  unrelated molecules (approved drugs) by affinity (see `data/ligands.smi`).
+  dock without issue via `qvina2 --receptor rigid.pdbqt --flex flex.pdbqt
+  ...`, and the box (ligand extent + every flexible residue's atoms +
+  padding, see `pocket.compute_box`'s `extra_coords`) contains every
+  flexible side chain's movable atoms -- confirmed by `dd_docking-dock`
+  returning a real pose/affinity for every `(ligand, member)` task rather
+  than Vina's "no conformations completely within the search space" failure.
+- Self-docking each member's own co-crystallized ligand, real ER-alpha
+  actives, and DUD-E property-matched decoys together produces a ranking
+  where the weakest, most topologically-distinct decoys separate cleanly at
+  the bottom, while docking alone doesn't cleanly separate every decoy from
+  every true active/native higher up the list -- and MD-based induced-fit
+  rescoring doesn't either, in this specific case (see the worked example
+  above). This is the expected, honestly-reported behavior of a rigorous
+  property-matched benchmark, not a discrimination failure to hide.
 - `receptor_prep.py`'s `regularize_carboxylate_geometry` fixes a PDBFixer
   `addMissingAtoms()` quirk (a freshly-added carboxylate partner oxygen --
   backbone OXT at a chain terminus, or Asp/Glu OD2/OE2 -- placed at a
@@ -342,7 +440,7 @@ df = run_ensemble_docking(
 | Module | Role |
 |---|---|
 | `receptor_prep.py` | PDB fetch/chain isolation/residue cleanup (TER insertion, CYX renaming), PDBFixer-based repair, post-PDBFixer carboxylate geometry regularization (`regularize_carboxylate_geometry`) |
-| `pocket.py` | docking box calculation, distance-based flexible-residue detection, Meeko flexres string formatting |
+| `pocket.py` | docking box calculation (ligand extent + optional flexible-residue atoms via `extra_coords`), distance-based flexible-residue detection, Meeko flexres string formatting |
 | `ensemble.py` | batch receptor_prep + pocket + Meeko PDBQT generation across conformations; save/load as `manifest.json` |
 | `ligand_prep.py` | `.smi` reading, SMILES -> 3D (ETKDGv3+MMFF) -> Meeko ligand PDBQT |
 | `docking.py` | CPU docking via QuickVina2 (`qvina2` CLI), with flexible-receptor support (`dock_ligand`) |

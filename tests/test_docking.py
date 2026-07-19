@@ -14,16 +14,16 @@ import pytest
 from dd_docking.docking import dock_ligand
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "ensemble"
-_RIGID_PDBQT = _DATA_DIR / "6w63_rigid.pdbqt"
-_FLEX_PDBQT = _DATA_DIR / "6w63_flex.pdbqt"
-_CENTER = [-19.343, 18.299, -27.242]
-_SIZE = [17.944, 21.143, 22.978]
+_RIGID_PDBQT = _DATA_DIR / "3ert_rigid.pdbqt"
+_FLEX_PDBQT = _DATA_DIR / "3ert_flex.pdbqt"
+_CENTER = [30.282, -1.913, 24.206]
+_SIZE = [28.448, 24.756, 28.687]
 
 pytestmark = [
     pytest.mark.skipif(shutil.which("qvina2") is None, reason="qvina2 binary not on PATH"),
     pytest.mark.skipif(
         not _RIGID_PDBQT.exists(),
-        reason="data/ensemble/6w63_rigid.pdbqt fixture not present in this checkout",
+        reason="data/ensemble/3ert_rigid.pdbqt fixture not present in this checkout",
     ),
 ]
 

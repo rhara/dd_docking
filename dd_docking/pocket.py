@@ -12,9 +12,17 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 Coord = Tuple[float, float, float]
 
 
-def compute_box(ligand_lines: Sequence[str], padding: float = 5.0):
+def compute_box(ligand_lines: Sequence[str], padding: float = 5.0, *,
+                extra_coords: Optional[Sequence[Coord]] = None):
     """Docking box center/size (each axis) spanning the given ligand
-    ATOM/HETATM lines plus `padding` Angstrom on every side."""
+    ATOM/HETATM lines, plus `padding` Angstrom on every side.
+
+    `extra_coords` (e.g. flexible side-chain atom coordinates from
+    `residue_coords`, see `ensemble.py`) are folded into the same bounding
+    box before padding, so a flexible residue reaching further from the
+    ligand than a uniform padding would cover doesn't get its movable atoms
+    pushed outside the search box (Vina then reports "no conformations
+    completely within the search space" and returns no poses at all)."""
     xs, ys, zs = [], [], []
     for ln in ligand_lines:
         if ln[:6] in ("ATOM  ", "HETATM"):
@@ -23,6 +31,10 @@ def compute_box(ligand_lines: Sequence[str], padding: float = 5.0):
             zs.append(float(ln[46:54]))
     if not xs:
         raise ValueError("compute_box: no ligand atoms found")
+    for x, y, z in (extra_coords or ()):
+        xs.append(x)
+        ys.append(y)
+        zs.append(z)
     center = [round((min(v) + max(v)) / 2, 3) for v in (xs, ys, zs)]
     size = [round((max(v) - min(v)) + 2 * padding, 3) for v in (xs, ys, zs)]
     return center, size
@@ -90,6 +102,14 @@ def find_pocket_residues(receptor_pdb: Path, ref_coords: Iterable[Coord],
     if max_residues is not None:
         closest = closest[:max_residues]
     return sorted(closest, key=lambda r: (r.chain, r.resnum))
+
+
+def residue_coords(pdb_text: str, residues: Iterable[Residue]) -> List[Coord]:
+    """Atom coordinates belonging to the given residues (e.g. chosen
+    flexible side chains) -- see `compute_box`'s `extra_coords`."""
+    wanted = {(r.chain, r.resnum) for r in residues}
+    return [coord for chain, resnum, coord in _parse_atom_lines(pdb_text)
+            if (chain, resnum) in wanted]
 
 
 def format_flexres(residues: Sequence[Residue]) -> str:

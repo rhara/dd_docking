@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dd_docking.pocket import Residue, compute_box, find_pocket_residues, format_flexres
+from dd_docking.pocket import Residue, compute_box, find_pocket_residues, format_flexres, residue_coords
 
 # Two ATOM lines (chain A, resnum 10 and 20) and one far-away line (resnum 99).
 _PDB_TEXT = (
@@ -19,6 +19,21 @@ def test_compute_box_centers_on_ligand_with_padding():
     center, size = compute_box(_LIGAND_LINES, padding=2.0)
     assert center == [1.0, 0.5, -0.5]
     assert size == [1.0 + 4.0, 1.0 + 4.0, 1.0 + 4.0]
+
+
+def test_compute_box_expands_to_cover_extra_coords():
+    # Without extra_coords the box only spans the ligand (see the test
+    # above); a far-away extra_coord must widen/re-center it too, so a
+    # flexible side chain reaching past the ligand's own footprint still
+    # ends up inside the search box.
+    center, size = compute_box(_LIGAND_LINES, padding=2.0, extra_coords=[(10.0, 0.0, 0.0)])
+    assert center == [5.25, 0.5, -0.5]
+    assert size == [9.5 + 4.0, 1.0 + 4.0, 1.0 + 4.0]
+
+
+def test_residue_coords_selects_only_named_residues():
+    coords = residue_coords(_PDB_TEXT, [Residue("A", 10)])
+    assert coords == [(0.0, 0.0, 0.0)]
 
 
 def test_find_pocket_residues_within_cutoff(tmp_path):
