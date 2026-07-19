@@ -1,6 +1,6 @@
 [Japanese version](README.jp.md)
 
-# dd_docking
+# dd_docking — ensemble docking with flexible-side-chain sampling and MD-based induced-fit rescoring
 
 An ensemble docking toolkit with induced-fit-style pocket dynamics for
 virtual screening. Designed as a reusable package, not tied to any specific
