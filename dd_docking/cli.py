@@ -62,6 +62,13 @@ def build_dock_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-n", type=int, default=None, help="Only keep the top N ranked ligands")
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--n-jobs", type=int, default=1, help="Parallel worker processes for the (ligand, member) task grid (<=0 = all CPU cores, default 1 = sequential). Each worker is auto-pinned to (CPU count / n-jobs) cores -- see README for why flexible docking needs several cores per task, unlike cheap rigid docking")
+    parser.add_argument(
+        "--backend", default="auto", choices=["auto", "cpu", "gpu"],
+        help="Docking backend: auto (default) uses Vina-GPU+ when built and the box fits its "
+             "OpenCL kernel (<30 A per side), else CPU vina; cpu always uses CPU vina (every "
+             "platform); gpu requires Vina-GPU+ (Linux only, see scripts/build_vina_gpu.sh) and "
+             "falls back to cpu with a warning if it isn't usable for a given member",
+    )
     return parser
 
 
@@ -77,6 +84,7 @@ def main_dock(argv=None):
         ensemble, ligands,
         exhaustiveness=args.exhaustiveness, n_poses=args.n_poses, seed=args.seed,
         n_jobs=args.n_jobs, show_progress=not args.no_progress, top_n=args.top_n,
+        backend=args.backend,
         out_csv=str(out_dir / "ranked_results.csv"), out_sdf=str(out_dir / "top_hits.sdf"),
     )
     print(f"\n[done] {len(hits)} ligand(s) ranked -> {out_dir}/ranked_results.csv")

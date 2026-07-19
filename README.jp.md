@@ -34,6 +34,44 @@ pip install -e .
 これにより3つのコンソールコマンドがインストールされる: `dd_docking-prep`,
 `dd_docking-dock`, `dd_docking-refine`。
 
+### オプション: GPUアクセラレーションドッキング（Linux限定）
+
+`dd_docking-dock`は、CPU版`vina`の代わりに
+[Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)を使用できる
+（ビルド済みで、かつタスクのボックスサイズがOpenCLカーネルの制限に収まる
+場合）。これはLinux限定の機能であり、macOS/Windows（またはバイナリを
+ビルドしていないLinux）では、`dd_docking-dock`は自動的にCPU版`vina`に
+フォールバックする——コードの変更は不要で、純粋にランタイムのフォール
+バックである（後述の`--backend`を参照）。
+
+```bash
+mamba activate dd_docking
+bash scripts/build_vina_gpu.sh
+```
+
+このスクリプトはVina-GPU+のソースを（固定コミットで）クローン・ビルドし
+（`third_party/`配下、本リポジトリにはコミットしない）、生成された
+バイナリとカーネルファイルを`$CONDA_PREFIX/share/dd_docking/vina-gpu/`に
+インストールする。動作するOpenCLランタイムを持つNVIDIA/AMD GPUが必要
+（`clinfo`で確認可能）——NVIDIAの場合は通常ドライバ/CUDA toolkitの
+インストールに含まれる。AMD向け（`GPU_PLATFORM`）やOpenCLパスのカスタム
+指定（`DD_DOCKING_OPENCL_PATH`）は`scripts/build_vina_gpu.sh`を参照。
+
+Vina-GPU+カーネルの既知の制約: ドッキングボックスは各辺30Å未満である
+必要がある。`dd_docking`はアンサンブルメンバーごとにこれをチェックし、
+ボックスが大きすぎるメンバーについては自動的にCPUにフォールバックする
+——後述のドッキングセクションの`--backend`を参照。
+
+一部のGPU/ドライバの組み合わせでは、ビルド自体が成功していても
+ランタイムでOpenCLカーネルのビルドに失敗する未解決の上流バグに遭遇する
+（`CL_BUILD_PROGRAM_FAILURE`、またはカーネルコンパイル中のクラッシュ
+——upstreamの[Issue #1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/1)
+と[Issue #26](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/26)
+参照。本プロジェクトのGTX 1660 Tiでも再現した）。`dd_docking`はGPU側の
+ドッキングタスク失敗を検知すると、1回だけ警告を出しつつ自動的にCPUで
+再試行するため、結果は常に正しく得られる——ただし、ハードウェアによっては
+GPUアクセラレーション自体が使えない場合がある。
+
 ## 使い方
 
 ### 1. アンサンブル準備（`dd_docking-prep`）
@@ -169,6 +207,7 @@ dd_docking-dock data/ensemble data/ligands.smi \
 | `--seed` | `0` | 乱数シード（埋め込みおよびドッキング） |
 | `--top-n` | 全件 | 上位N件の結果のみ保持 |
 | `--n-jobs` | `1` | `(ligand, member)` タスクごとの並列ワーカー数（`<=0`で全コア使用） |
+| `--backend` | `auto` | ドッキングエンジン: `auto`はビルド済みかつメンバーのボックスがVina-GPU+の30Å未満制限に収まる場合にそれを使用、それ以外はCPU版`vina`。`cpu`は常にCPU版`vina`（全OSで動作）。`gpu`はVina-GPU+を優先し、使えないメンバーではCPUに警告付きでフォールバックする（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照） |
 | `--no-progress` | - | 進捗ログを抑制 |
 
 **`--n-jobs` の挙動とCPU割り当て**: `--n-jobs 1`（デフォルト）は逐次実行
@@ -247,9 +286,9 @@ dd_docking-refine data/screen/ranked_results.csv \
 | `--vacuum` | - | GBn2暗黙溶媒の代わりに真空中でMDを実行（暗黙溶媒のセットアップが失敗した場合の自動フォールバックでもある） |
 | `--platform` | `auto` | OpenMMのプラットフォーム: `auto` はCUDA→OpenCLの順で優先し、どちらも使えない場合はCPUにフォールバックする。`CPU`/`CUDA`/`OpenCL`/`Reference` を指定して明示的に強制することも可能（そのプラットフォームが使えない場合はエラーになる） |
 
-このパッケージでGPUが使えるのはMD精密化のみである（ここで使っている
-`vina` パッケージにはGPUバックエンドがないため、Vinaドッキング自体は
-対象外）。したがって `--platform` は `dd_docking-refine` にのみ適用される。
+`--platform` はMDステップ（`dd_docking-refine`）にのみ適用される。
+ドッキング自体のGPUオプションは`dd_docking-dock --backend`である
+（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照）。
 
 Python API:
 
@@ -305,6 +344,7 @@ df = run_ensemble_docking(
 | `ensemble.py` | 複数コンフォメーションにまたがるreceptor_prep + pocket + Meeko PDBQT生成のバッチ処理、`manifest.json` としての保存/読み込み |
 | `ligand_prep.py` | `.smi` 読み込み、SMILES -> 3D（ETKDGv3+MMFF）-> Meekoリガンド PDBQT |
 | `docking.py` | フレキシブル受容体対応の薄いVinaラッパー（`make_vina` / `dock_ligand`） |
+| `gpu_backend.py` | オプションのVina-GPU+バックエンド（Linux限定）: バックエンド選択（`resolve_backend`）、subprocess経由のドッキング（`dock_ligand_gpu`） |
 | `screening.py` | 全リガンド × 全メンバーの並列ドッキング、best-of-ensembleランキング、CSV/SDF出力 |
 | `refine_md.py` | 上位ヒットの短時間暗黙溶媒MD緩和、RMSD安定性評価、再ランキング |
 | `io.py` | PDBQT -> RDKit変換、ポーズSDF出力、結果CSV I/O |

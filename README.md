@@ -35,6 +35,43 @@ pip install -e .
 This installs three console commands: `dd_docking-prep`, `dd_docking-dock`,
 `dd_docking-refine`.
 
+### Optional: GPU-accelerated docking (Linux only)
+
+`dd_docking-dock` can use [Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)
+instead of CPU `vina` for a given docking task, when it's built and the
+task's box fits the OpenCL kernel's size limit. This is Linux-only; on
+macOS/Windows (or on Linux without the binary built), `dd_docking-dock`
+transparently uses CPU `vina` — no code changes needed, this is purely a
+runtime fallback (see `--backend` below).
+
+```bash
+mamba activate dd_docking
+bash scripts/build_vina_gpu.sh
+```
+
+This clones and builds Vina-GPU+ from source (pinned commit) into
+`third_party/` (not checked into this repo) and installs the resulting
+binary + kernel files into `$CONDA_PREFIX/share/dd_docking/vina-gpu/`.
+Requires an NVIDIA/AMD GPU with a working OpenCL runtime (check with
+`clinfo`) — on NVIDIA this normally comes from the driver/CUDA toolkit
+install. See `scripts/build_vina_gpu.sh` for the AMD (`GPU_PLATFORM`) and
+custom OpenCL path (`DD_DOCKING_OPENCL_PATH`) overrides.
+
+Known limitation of the Vina-GPU+ kernel: the docking box must be under 30 Å
+in every dimension. `dd_docking` checks this per ensemble member and falls
+back to CPU automatically for members whose box is too large — see
+`--backend` in the docking section below.
+
+Some GPU/driver combinations also hit an unresolved upstream OpenCL kernel
+build bug at runtime even after a successful build (`CL_BUILD_PROGRAM_FAILURE`
+or a crash while compiling the kernel — see upstream issues
+[#1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/1) and
+[#26](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0/issues/26); reproduced
+on this project's GTX 1660 Ti). `dd_docking` detects a failed GPU docking
+task and automatically retries it on CPU with a one-time warning, so results
+stay correct either way — but GPU acceleration itself may simply not be
+usable on some hardware.
+
 ## Usage
 
 ### 1. Ensemble preparation (`dd_docking-prep`)
@@ -173,6 +210,7 @@ Key options:
 | `--seed` | `0` | random seed (embedding and docking) |
 | `--top-n` | all | keep only the top N results |
 | `--n-jobs` | `1` | parallel workers, one per `(ligand, member)` task (`<=0` for all cores) |
+| `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member's box fits its <30 Å OpenCL kernel limit, else CPU `vina`; `cpu` always uses CPU `vina` (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)) |
 | `--no-progress` | - | suppress progress log |
 
 **`--n-jobs` behavior and CPU allocation**: `--n-jobs 1` (default) runs
@@ -249,9 +287,9 @@ Key options:
 | `--vacuum` | - | run MD in vacuum instead of GBn2 implicit solvent (also the automatic fallback if implicit-solvent setup fails) |
 | `--platform` | `auto` | OpenMM platform: `auto` prefers CUDA, then OpenCL, falling back to CPU if neither is usable on this machine; pass `CPU`/`CUDA`/`OpenCL`/`Reference` to force one explicitly (raises if that platform isn't usable) |
 
-MD refinement is the only GPU-capable stage in this package (Vina docking,
-via the `vina` package used here, has no GPU backend), so `--platform` only
-applies to `dd_docking-refine`.
+`--platform` only applies to `dd_docking-refine`'s MD step; docking's own
+GPU option is `dd_docking-dock --backend` (see
+[GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)).
 
 Python API:
 
@@ -306,6 +344,7 @@ df = run_ensemble_docking(
 | `ensemble.py` | batch receptor_prep + pocket + Meeko PDBQT generation across conformations; save/load as `manifest.json` |
 | `ligand_prep.py` | `.smi` reading, SMILES -> 3D (ETKDGv3+MMFF) -> Meeko ligand PDBQT |
 | `docking.py` | thin Vina wrapper with flexible-receptor support (`make_vina` / `dock_ligand`) |
+| `gpu_backend.py` | optional Vina-GPU+ backend (Linux only): backend selection (`resolve_backend`), subprocess docking (`dock_ligand_gpu`) |
 | `screening.py` | parallel all-ligand × all-member docking, best-of-ensemble ranking, CSV/SDF output |
 | `refine_md.py` | short implicit-solvent MD relaxation of top hits, RMSD stability evaluation, re-ranking |
 | `io.py` | PDBQT -> RDKit conversion, pose SDF output, result CSV I/O |

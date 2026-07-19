@@ -5,6 +5,11 @@ __pycache__/
 *.html
 .pytest_cache/
 
+# scripts/build_vina_gpu.sh clones/builds Boost + Vina-GPU-2.0 here; the
+# built binary is installed into $CONDA_PREFIX/share/dd_docking/vina-gpu/,
+# not committed here.
+third_party/
+
 # dd_docking-prep / dd_docking-dock / dd_docking-refine outputs (reproducible
 # from data/raw/*.pdb + data/ligands.smi via the commands in README.md)
 data/ensemble/

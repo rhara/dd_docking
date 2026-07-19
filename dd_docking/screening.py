@@ -14,7 +14,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import docking, io, ligand_prep
+from . import docking, gpu_backend, io, ligand_prep
 from .ensemble import EnsembleMember
 from .ligand_prep import Ligand
 from .parallel import parallel_map
@@ -38,15 +38,32 @@ def rank_key(hit: EnsembleHit):
 
 
 def _dock_task(task) -> Tuple[str, str, Optional[float], Optional[str]]:
-    ligand_id, smiles, member, exhaustiveness, n_poses, seed, cpu = task
+    ligand_id, smiles, member, exhaustiveness, n_poses, seed, cpu, backend = task
     pdbqt = ligand_prep.prepare_ligand_pdbqt(smiles, seed=seed)
     if pdbqt is None:
         return ligand_id, member.member_id, None, None
-    v = docking.make_vina(
-        member.rigid_pdbqt, member.center, member.size,
-        flex_pdbqt=member.flex_pdbqt, seed=seed, exhaustiveness=exhaustiveness, cpu=cpu,
-    )
-    result = docking.dock_ligand(v, pdbqt, n_poses=n_poses)
+
+    result = None
+    if gpu_backend.resolve_backend(backend, member.size) == "gpu":
+        result = gpu_backend.dock_ligand_gpu(
+            member.rigid_pdbqt, pdbqt, member.center, member.size,
+            flex_pdbqt=member.flex_pdbqt, seed=seed, n_poses=n_poses,
+        )
+        if result is None:
+            # The Vina-GPU+ binary/driver/OpenCL kernel can fail for reasons
+            # unrelated to this particular ligand (e.g. a kernel build
+            # failure on some GPU generations); don't let that silently
+            # count as "no affinity" for every ligand against this member --
+            # retry on CPU, which is known to work everywhere.
+            gpu_backend.warn_gpu_task_failed(member.member_id)
+
+    if result is None:
+        v = docking.make_vina(
+            member.rigid_pdbqt, member.center, member.size,
+            flex_pdbqt=member.flex_pdbqt, seed=seed, exhaustiveness=exhaustiveness, cpu=cpu,
+        )
+        result = docking.dock_ligand(v, pdbqt, n_poses=n_poses)
+
     if result is None:
         return ligand_id, member.member_id, None, None
     affinity, poses_pdbqt = result
@@ -61,6 +78,7 @@ def screen_ensemble(
     n_poses: int = 5,
     seed: int = 0,
     n_jobs: int = 1,
+    backend: str = "auto",
     show_progress: bool = True,
     out_csv: Optional[str] = None,
     out_sdf: Optional[str] = None,
@@ -68,6 +86,13 @@ def screen_ensemble(
 ) -> List[EnsembleHit]:
     """Dock every ligand against every ensemble member; rank ligands by the
     best (lowest) affinity achieved across the ensemble.
+
+    `backend` selects the docking engine per (ligand, member) task: "auto"
+    (default) uses the Vina-GPU+ binary when it's installed and the
+    member's box fits its OpenCL kernel's <30 A per-side limit, else CPU
+    `vina`; "cpu" always uses CPU `vina` (works on every OS); "gpu" prefers
+    Vina-GPU+ and falls back to CPU with a warning when it isn't usable for
+    a given member. See `gpu_backend.resolve_backend`.
 
     `n_jobs` parallelizes across the full (ligand, member) task grid: 1
     (default) runs sequentially, letting Vina use every core internally for
@@ -91,7 +116,7 @@ def screen_ensemble(
         n_workers = n_jobs if n_jobs and n_jobs > 0 else (os.cpu_count() or 1)
         cpu_per_task = max(1, (os.cpu_count() or 1) // n_workers)
     tasks = [
-        (ligand.ligand_id, ligand.smiles, member, exhaustiveness, n_poses, seed, cpu_per_task)
+        (ligand.ligand_id, ligand.smiles, member, exhaustiveness, n_poses, seed, cpu_per_task, backend)
         for ligand in ligands
         for member in ensemble
     ]
