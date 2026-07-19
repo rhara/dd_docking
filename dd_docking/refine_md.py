@@ -52,15 +52,57 @@ def _ligand_from_pose(pose_pdbqt: Path) -> Tuple[Any, Any]:
     return off, best
 
 
-def _build_simulation(protein_pdb: Path, off_lig, implicit: bool,
-                      temperature_k: float, timestep_fs: float) -> Tuple[Any, Any]:
-    """Build an OpenMM `Simulation` (CPU platform, Langevin middle
-    integrator) for the given protein PDB + OpenFF ligand molecule.
+_GPU_PLATFORMS = ("CUDA", "OpenCL")
+_PLATFORM_PROPERTIES = {"CUDA": {"Precision": "mixed"}, "OpenCL": {"Precision": "mixed"}}
 
-    Returns (simulation, modeller). `modeller` holds the combined
-    protein+ligand topology/positions used to write out the complex PDB.
+
+def _create_simulation(topology, system, make_integrator, platform: str) -> Tuple[Any, str]:
+    """Create an OpenMM `Simulation` on `platform` ("CPU", "CUDA", "OpenCL",
+    "Reference", or "auto"). `make_integrator` is a zero-arg factory (not a
+    ready integrator) because each attempted platform needs its own fresh
+    Integrator instance -- an Integrator can only ever be bound to one
+    Context, so reusing one across a failed-then-retried Context raises.
+
+    "auto" (the default end to end) tries CUDA then OpenCL -- MD refinement
+    is the only GPU-capable stage in this package (Vina docking, via the
+    `vina` package used here, has no GPU backend) -- falling back to CPU if
+    neither GPU platform is registered/usable on this machine, so callers
+    always get a working Simulation back. An explicit platform name is used
+    as given with no fallback, so a bad/unavailable request raises instead
+    of silently running on something else.
+
+    Returns (simulation, resolved_platform_name).
     """
-    from openmm import LangevinMiddleIntegrator, Platform, app, unit
+    from openmm import Platform, app
+
+    if platform != "auto":
+        p = Platform.getPlatformByName(platform)
+        sim = app.Simulation(topology, system, make_integrator(), p, _PLATFORM_PROPERTIES.get(platform, {}))
+        return sim, platform
+
+    for candidate in _GPU_PLATFORMS:
+        try:
+            p = Platform.getPlatformByName(candidate)
+            sim = app.Simulation(topology, system, make_integrator(), p, _PLATFORM_PROPERTIES[candidate])
+            return sim, candidate
+        except Exception:  # noqa: BLE001 -- plugin missing, or no usable device
+            continue
+    p = Platform.getPlatformByName("CPU")
+    return app.Simulation(topology, system, make_integrator(), p), "CPU"
+
+
+def _build_simulation(protein_pdb: Path, off_lig, implicit: bool,
+                      temperature_k: float, timestep_fs: float,
+                      platform: str = "auto") -> Tuple[Any, Any, str]:
+    """Build an OpenMM `Simulation` (Langevin middle integrator) for the
+    given protein PDB + OpenFF ligand molecule, on `platform` (see
+    `_create_simulation` for the "auto"/GPU selection behavior).
+
+    Returns (simulation, modeller, resolved_platform_name). `modeller` holds
+    the combined protein+ligand topology/positions used to write out the
+    complex PDB.
+    """
+    from openmm import LangevinMiddleIntegrator, app, unit
     from openmm.app import Modeller, PDBFile
     from openmmforcefields.generators import SystemGenerator
 
@@ -77,13 +119,15 @@ def _build_simulation(protein_pdb: Path, off_lig, implicit: bool,
     modeller.add(lig_top, lig_pos)
 
     system = sysgen.create_system(modeller.topology)
-    integrator = LangevinMiddleIntegrator(temperature_k * unit.kelvin,
-                                          1.0 / unit.picosecond,
-                                          timestep_fs * unit.femtoseconds)
-    platform = Platform.getPlatformByName("CPU")
-    sim = app.Simulation(modeller.topology, system, integrator, platform)
+
+    def make_integrator():
+        return LangevinMiddleIntegrator(temperature_k * unit.kelvin,
+                                        1.0 / unit.picosecond,
+                                        timestep_fs * unit.femtoseconds)
+
+    sim, used_platform = _create_simulation(modeller.topology, system, make_integrator, platform)
     sim.context.setPositions(modeller.positions)
-    return sim, modeller
+    return sim, modeller, used_platform
 
 
 def _summarize_rmsd(rmsd: Any, *, stable_mean_cutoff: float = 3.0,
@@ -131,7 +175,8 @@ def _ligand_rmsd_series(top_pdb: Path, dcd: Path):
 def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path, *,
                    implicit: bool = True, temperature_k: float = 300.0,
                    timestep_fs: float = 4.0, equil_ps: float = 20.0,
-                   prod_ps: float = 100.0, report_ps: float = 2.0) -> Dict[str, Any]:
+                   prod_ps: float = 100.0, report_ps: float = 2.0,
+                   platform: str = "auto") -> Dict[str, Any]:
     """Minimize -> equilibrate -> run a short production MD for one
     protein+pose complex, and summarize ligand pose stability.
 
@@ -154,14 +199,18 @@ def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path
         prod_ps: Production run length, in picoseconds.
         report_ps: Trajectory frame-writing interval during production, in
             picoseconds.
+        platform: OpenMM platform: "auto" (default, prefers CUDA then
+            OpenCL, falls back to CPU), or an explicit "CPU"/"CUDA"/
+            "OpenCL"/"Reference" (raises if that platform isn't usable).
 
     Returns:
         A dict record with keys: "name", "status" ("ok" or "fail"),
-        "implicit" (bool, solvent model actually used), "n_frames" (int),
-        "rmsd_mean"/"rmsd_final"/"rmsd_max" (ligand heavy-atom RMSD in
-        Angstrom), "stable" (bool, rmsd_mean < 3.0 and rmsd_final < 4.0),
-        and "e_min_kcal"/"e_final_kcal" (potential energy in kcal/mol
-        before minimization and after production, respectively).
+        "implicit" (bool, solvent model actually used), "platform" (str,
+        OpenMM platform actually used), "n_frames" (int), "rmsd_mean"/
+        "rmsd_final"/"rmsd_max" (ligand heavy-atom RMSD in Angstrom),
+        "stable" (bool, rmsd_mean < 3.0 and rmsd_final < 4.0), and
+        "e_min_kcal"/"e_final_kcal" (potential energy in kcal/mol before
+        minimization and after production, respectively).
     """
     from openmm import app, unit
 
@@ -172,12 +221,15 @@ def refine_one_hit(name: str, pose_pdbqt: Path, protein_pdb: Path, workdir: Path
     off_lig, _ = _ligand_from_pose(pose_pdbqt)
 
     try:
-        sim, modeller = _build_simulation(protein_pdb, off_lig, implicit, temperature_k, timestep_fs)
+        sim, modeller, used_platform = _build_simulation(
+            protein_pdb, off_lig, implicit, temperature_k, timestep_fs, platform)
     except Exception as e:  # noqa: BLE001
         print(f"[MD {name}] implicit solvent system build failed, retrying in vacuum: {e}", flush=True)
         implicit = False
-        sim, modeller = _build_simulation(protein_pdb, off_lig, False, temperature_k, timestep_fs)
+        sim, modeller, used_platform = _build_simulation(
+            protein_pdb, off_lig, False, temperature_k, timestep_fs, platform)
     rec["implicit"] = implicit
+    rec["platform"] = used_platform
 
     top_pdb = workdir / "complex.pdb"
     with open(top_pdb, "w") as fh:
@@ -211,7 +263,7 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
                     implicit: bool = True, temperature_k: float = 300.0,
                     timestep_fs: float = 4.0, equil_ps: float = 20.0,
                     prod_ps: float = 100.0, report_ps: float = 2.0,
-                    show_progress: bool = True) -> pd.DataFrame:
+                    show_progress: bool = True, platform: str = "auto") -> pd.DataFrame:
     """Read a `dd_docking-dock` ranked CSV (must have `pose_pdbqt` and
     `receptor_pdb` columns) and MD-refine/rescore its top `top_n` hits.
     Writes and returns `md_rescore.csv`: Vina affinity re-ranked by
@@ -234,6 +286,9 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
         report_ps: Trajectory frame-writing interval during production,
             in picoseconds.
         show_progress: If True, print a progress line per completed hit.
+        platform: OpenMM platform, forwarded to `refine_one_hit` for every
+            hit: "auto" (default, prefers CUDA then OpenCL, falls back to
+            CPU) or an explicit "CPU"/"CUDA"/"OpenCL"/"Reference".
 
     Returns:
         The results DataFrame (also written to `out_dir/md_rescore.csv`),
@@ -270,14 +325,14 @@ def refine_top_hits(ranked_csv: str, out_dir: str, *, top_n: int = 5,
             res = refine_one_hit(
                 str(r["ligand_id"]), Path(r["pose_pdbqt"]), protein_pdb, workdir,
                 implicit=implicit, temperature_k=temperature_k, timestep_fs=timestep_fs,
-                equil_ps=equil_ps, prod_ps=prod_ps, report_ps=report_ps,
+                equil_ps=equil_ps, prod_ps=prod_ps, report_ps=report_ps, platform=platform,
             )
         except Exception as e:  # noqa: BLE001
             res = {"name": str(r["ligand_id"]), "status": f"error:{type(e).__name__}"}
         res["best_affinity"] = float(r["best_affinity"])
         results.append(res)
         if res.get("status") == "ok":
-            progress.update(res["name"], res["implicit"], res["rmsd_mean"], res["rmsd_final"], res["stable"])
+            progress.update(res["name"], res["implicit"], res["platform"], res["rmsd_mean"], res["rmsd_final"], res["stable"])
 
     out = pd.DataFrame(results)
     if "stable" in out:

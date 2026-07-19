@@ -245,6 +245,11 @@ dd_docking-refine data/screen/ranked_results.csv \
 | `--prod-ps` | `100.0` | プロダクションランの長さ（ps） |
 | `--equil-ps` | `20.0` | 平衡化の長さ（ps） |
 | `--vacuum` | - | GBn2暗黙溶媒の代わりに真空中でMDを実行（暗黙溶媒のセットアップが失敗した場合の自動フォールバックでもある） |
+| `--platform` | `auto` | OpenMMのプラットフォーム: `auto` はCUDA→OpenCLの順で優先し、どちらも使えない場合はCPUにフォールバックする。`CPU`/`CUDA`/`OpenCL`/`Reference` を指定して明示的に強制することも可能（そのプラットフォームが使えない場合はエラーになる） |
+
+このパッケージでGPUが使えるのはMD精密化のみである（ここで使っている
+`vina` パッケージにはGPUバックエンドがないため、Vinaドッキング自体は
+対象外）。したがって `--platform` は `dd_docking-refine` にのみ適用される。
 
 Python API:
 

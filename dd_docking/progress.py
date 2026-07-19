@@ -25,17 +25,17 @@ class DockProgress:
 
 class RefineProgress:
     """Prints one line per MD-refined hit:
-    `<name> <implicit/vacuum>  rmsd_mean=.. rmsd_final=.. stable=..`
+    `<name> <implicit/vacuum> platform=<platform>  rmsd_mean=.. rmsd_final=.. stable=..`
     """
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
 
-    def update(self, name: str, implicit: bool, rmsd_mean: float, rmsd_final: float, stable: bool) -> None:
+    def update(self, name: str, implicit: bool, platform: str, rmsd_mean: float, rmsd_final: float, stable: bool) -> None:
         if not self.enabled:
             return
         print(
-            f"[MD {name}] {'implicit' if implicit else 'vacuum'}  "
+            f"[MD {name}] {'implicit' if implicit else 'vacuum'}  platform={platform}  "
             f"rmsd_mean={rmsd_mean:.2f}  rmsd_final={rmsd_final:.2f}  stable={stable}",
             flush=True,
         )

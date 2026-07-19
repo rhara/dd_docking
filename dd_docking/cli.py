@@ -94,6 +94,12 @@ def build_refine_parser() -> argparse.ArgumentParser:
     parser.add_argument("--equil-ps", type=float, default=20.0)
     parser.add_argument("--vacuum", action="store_true", help="Use vacuum instead of GBn2 implicit solvent")
     parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument(
+        "--platform", default="auto", choices=["auto", "CPU", "CUDA", "OpenCL", "Reference"],
+        help="OpenMM platform for MD (default: auto -- prefers CUDA, then OpenCL, falls back to "
+             "CPU if no GPU platform is usable on this machine; pass CPU/CUDA/OpenCL/Reference "
+             "to force one explicitly)",
+    )
     return parser
 
 
@@ -102,6 +108,6 @@ def main_refine(argv=None):
     out = refine_md.refine_top_hits(
         args.ranked_csv, args.out_dir, top_n=args.top_n,
         implicit=not args.vacuum, prod_ps=args.prod_ps, equil_ps=args.equil_ps,
-        show_progress=not args.no_progress,
+        show_progress=not args.no_progress, platform=args.platform,
     )
     print(f"\n[done] {len(out)} hit(s) refined -> {args.out_dir}/md_rescore.csv")

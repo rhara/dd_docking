@@ -247,6 +247,11 @@ Key options:
 | `--prod-ps` | `100.0` | production run length (ps) |
 | `--equil-ps` | `20.0` | equilibration length (ps) |
 | `--vacuum` | - | run MD in vacuum instead of GBn2 implicit solvent (also the automatic fallback if implicit-solvent setup fails) |
+| `--platform` | `auto` | OpenMM platform: `auto` prefers CUDA, then OpenCL, falling back to CPU if neither is usable on this machine; pass `CPU`/`CUDA`/`OpenCL`/`Reference` to force one explicitly (raises if that platform isn't usable) |
+
+MD refinement is the only GPU-capable stage in this package (Vina docking,
+via the `vina` package used here, has no GPU backend), so `--platform` only
+applies to `dd_docking-refine`.
 
 Python API:
 
