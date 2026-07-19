@@ -2,8 +2,7 @@
 
 バーチャルスクリーニング向けの、induced-fit様のポケットダイナミクスを備えた
 アンサンブルドッキングツールキット。特定の標的やリガンドセットに紐付かない、
-再利用可能なパッケージとして設計されている（`dd_overlay` / `dd_confgen` /
-`dd_viewer` と同じ思想）。
+再利用可能なパッケージとして設計されている。
 
 - **アンサンブル準備（`dd_docking-prep`）**: 複数の受容体コンフォメーション
   （PDB）をPDBFixerで構造修復し、各共結晶リガンドからドッキングボックスと
@@ -25,9 +24,9 @@ vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, mdtraj
 経由でのインストールが最善である。
 
 ```bash
-conda create -n dd_docking-env python=3.10 -c conda-forge \
+mamba create -n dd_docking python=3.12 -c conda-forge \
     rdkit numpy pandas vina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
-conda activate dd_docking-env
+mamba activate dd_docking
 cd dd_docking
 pip install -e .
 ```
@@ -156,10 +155,8 @@ dd_docking-dock data/ensemble data/ligands.smi \
   affinity[<member_id>]...`。`receptor_pdb` / `pose_pdbqt` は
   `dd_docking-refine` にそのまま渡される。
 - `data/screen/top_hits.sdf` — 各ヒットの最良ポーズを `affinity` プロパティ
-  付きで格納。**このプロパティ名は、姉妹プロジェクトである
-  蛋白-リガンドビューア（`rhara/dd_viewer`、`dd_viewer`）によりスコアとして
-  自動認識される**ため、このファイルは受容体PDB（`ranked_results.csv`の
-  `receptor_pdb` 列）と一緒にビューアへ直接読み込むことができる。
+  付きで格納。このファイルは受容体PDB（`ranked_results.csv`の
+  `receptor_pdb` 列）と一緒に蛋白-リガンドビューアへ直接読み込むことができる。
 - `data/screen/ranked_results_poses/` — ヒットごとのPDBQTファイル
   （`dd_docking-refine` の入力）。
 

@@ -4,7 +4,7 @@
 
 An ensemble docking toolkit with induced-fit-style pocket dynamics for
 virtual screening. Designed as a reusable package, not tied to any specific
-target or ligand set (same philosophy as `dd_overlay` / `dd_confgen` / `dd_viewer`).
+target or ligand set.
 
 - **Ensemble preparation (`dd_docking-prep`)**: structurally repairs multiple
   receptor conformations (PDB) with PDBFixer, determines the docking box and
@@ -22,12 +22,12 @@ target or ligand set (same philosophy as `dd_overlay` / `dd_confgen` / `dd_viewe
 
 Requires vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit,
 and mdtraj (now declared in `pyproject.toml`'s `dependencies`). These are
-best installed via conda-forge:
+best installed via conda-forge, using mamba:
 
 ```bash
-conda create -n dd_docking-env python=3.10 -c conda-forge \
+mamba create -n dd_docking python=3.12 -c conda-forge \
     rdkit numpy pandas vina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
-conda activate dd_docking-env
+mamba activate dd_docking
 cd dd_docking
 pip install -e .
 ```
@@ -158,10 +158,9 @@ Output:
   affinity[<member_id>]...`. `receptor_pdb` / `pose_pdbqt` are consumed
   directly by `dd_docking-refine`.
 - `data/screen/top_hits.sdf` — each hit's best pose, with an `affinity`
-  property. **This property name is auto-recognized as a score by the
-  companion protein-ligand viewer (`rhara/dd_viewer`, `dd_viewer`)**, so this
-  file can be loaded directly into the viewer together with the receptor PDB
-  (the `receptor_pdb` column of `ranked_results.csv`).
+  property, so this file can be loaded directly into a protein-ligand viewer
+  together with the receptor PDB (the `receptor_pdb` column of
+  `ranked_results.csv`).
 - `data/screen/ranked_results_poses/` — one PDBQT file per hit (input for
   `dd_docking-refine`).
 
