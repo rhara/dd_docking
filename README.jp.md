@@ -19,13 +19,16 @@
 
 ## インストール
 
-vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, mdtraj
-が必要（`pyproject.toml`の`dependencies`に明記済み）。これらはconda-forge
-経由でのインストールが最善である。
+meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, mdtraj
+が必要（`pyproject.toml`の`dependencies`に明記済み）。加えてCPUドッキング
+用に`qvina2` CLIバイナリ（conda-forgeの`qvina`パッケージ——QuickVina2、
+AutoDock Vina 1.1.2を高速化したフォーク）がPATH上に必要である。これは
+Pythonのimportではないため`pyproject.toml`の依存関係には書けない。
+これらはconda-forge経由でのインストールが最善である。
 
 ```bash
 mamba create -n dd_docking python=3.12 -c conda-forge \
-    rdkit numpy pandas vina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
+    rdkit numpy pandas qvina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
 mamba activate dd_docking
 cd dd_docking
 pip install -e .
@@ -36,11 +39,11 @@ pip install -e .
 
 ### オプション: GPUアクセラレーションドッキング（Linux限定）
 
-`dd_docking-dock`は、CPU版`vina`の代わりに
+`dd_docking-dock`は、CPU版QuickVina2の代わりに
 [Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)を使用できる
 （ビルド済みで、かつタスクのボックスサイズがOpenCLカーネルの制限に収まる
 場合）。これはLinux限定の機能であり、macOS/Windows（またはバイナリを
-ビルドしていないLinux）では、`dd_docking-dock`は自動的にCPU版`vina`に
+ビルドしていないLinux）では、`dd_docking-dock`は自動的にCPU版QuickVina2に
 フォールバックする——コードの変更は不要で、純粋にランタイムのフォール
 バックである（後述の`--backend`を参照）。
 
@@ -207,7 +210,7 @@ dd_docking-dock data/ensemble data/ligands.smi \
 | `--seed` | `0` | 乱数シード（埋め込みおよびドッキング） |
 | `--top-n` | 全件 | 上位N件の結果のみ保持 |
 | `--n-jobs` | `1` | `(ligand, member)` タスクごとの並列ワーカー数（`<=0`で全コア使用） |
-| `--backend` | `auto` | ドッキングエンジン: `auto`はビルド済みかつメンバーのボックスがVina-GPU+の30Å未満制限に収まる場合にそれを使用、それ以外はCPU版`vina`。`cpu`は常にCPU版`vina`（全OSで動作）。`gpu`はVina-GPU+を優先し、使えないメンバーではCPUに警告付きでフォールバックする（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照） |
+| `--backend` | `auto` | ドッキングエンジン: `auto`はビルド済みかつメンバーのボックスがVina-GPU+の30Å未満制限に収まる場合にそれを使用、それ以外はCPU版QuickVina2。`cpu`は常にCPU版QuickVina2（全OSで動作）。`gpu`はVina-GPU+を優先し、使えないメンバーではCPUに警告付きでフォールバックする（[GPUアクセラレーションドッキング](#オプション-gpuアクセラレーションドッキングlinux限定)を参照） |
 | `--no-progress` | - | 進捗ログを抑制 |
 
 **`--n-jobs` の挙動とCPU割り当て**: `--n-jobs 1`（デフォルト）は逐次実行
@@ -318,9 +321,9 @@ df = run_ensemble_docking(
 
 - `data/ensemble/` にある3つのアンサンブルメンバー（SARS-CoV-2 Mpro、
   PDB 6W63/7L11/7L10 — それぞれ異なる阻害剤と結合した、実際に異なる
-  ポケットコンフォメーション）のrigid/flex PDBQTファイルは、問題なく
-  `vina.Vina().set_receptor(rigid, flex)` に読み込まれ、グリッドマップの
-  計算も正常に成功する。
+  ポケットコンフォメーション）のrigid/flex PDBQTファイルは、
+  `qvina2 --receptor rigid.pdbqt --flex flex.pdbqt ...` で問題なく
+  ドッキングできる。
 - 各メンバーの共結晶リガンドをセルフドッキングすると、アフィニティに
   よって無関係な分子（承認薬）から弁別される（`data/ligands.smi` 参照）。
 - `receptor_prep.py` の `regularize_carboxylate_geometry` は、PDBFixerの
@@ -343,7 +346,7 @@ df = run_ensemble_docking(
 | `pocket.py` | ドッキングボックス計算、距離ベースのフレキシブル残基検出、Meeko flexres文字列フォーマット |
 | `ensemble.py` | 複数コンフォメーションにまたがるreceptor_prep + pocket + Meeko PDBQT生成のバッチ処理、`manifest.json` としての保存/読み込み |
 | `ligand_prep.py` | `.smi` 読み込み、SMILES -> 3D（ETKDGv3+MMFF）-> Meekoリガンド PDBQT |
-| `docking.py` | フレキシブル受容体対応の薄いVinaラッパー（`make_vina` / `dock_ligand`） |
+| `docking.py` | QuickVina2（`qvina2` CLI）経由のCPUドッキング、フレキシブル受容体対応（`dock_ligand`） |
 | `gpu_backend.py` | オプションのVina-GPU+バックエンド（Linux限定）: バックエンド選択（`resolve_backend`）、subprocess経由のドッキング（`dock_ligand_gpu`） |
 | `screening.py` | 全リガンド × 全メンバーの並列ドッキング、best-of-ensembleランキング、CSV/SDF出力 |
 | `refine_md.py` | 上位ヒットの短時間暗黙溶媒MD緩和、RMSD安定性評価、再ランキング |

@@ -4,8 +4,8 @@ built and installed by `scripts/build_vina_gpu.sh`.
 Linux-only. `resolve_backend` is the single place that decides whether a
 given docking task can/should run on the GPU; everything else (macOS,
 Windows, no binary installed, or a docking box too large for the OpenCL
-kernel's fixed limit) transparently falls back to the CPU `vina` package in
-`docking.py`, so callers never need their own platform checks.
+kernel's fixed limit) transparently falls back to the CPU QuickVina2 backend
+in `docking.py`, so callers never need their own platform checks.
 """
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ import tempfile
 import warnings
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
+
+from . import io
 
 BIN_NAME = "Vina-GPU"
 KERNEL_FILES = ("Kernel1_Opt.bin", "Kernel2_Opt.bin")
@@ -79,7 +81,7 @@ def resolve_backend(requested: str, size: Sequence[float]) -> str:
             _warn_once(
                 "gpu-unavailable",
                 "dd_docking: --backend gpu requested but no Vina-GPU+ binary found "
-                f"for this platform/{install_dir()} -- falling back to CPU vina. "
+                f"for this platform/{install_dir()} -- falling back to CPU (QuickVina2). "
                 "Run scripts/build_vina_gpu.sh on Linux to build it.",
             )
         return "cpu"
@@ -89,8 +91,8 @@ def resolve_backend(requested: str, size: Sequence[float]) -> str:
             _warn_once(
                 "gpu-box-too-large",
                 f"dd_docking: docking box {list(size)} has a dimension >= {MAX_BOX_DIM} A, "
-                "which Vina-GPU+'s OpenCL kernel cannot handle -- falling back to CPU vina "
-                "for this ensemble member.",
+                "which Vina-GPU+'s OpenCL kernel cannot handle -- falling back to CPU "
+                "(QuickVina2) for this ensemble member.",
             )
         return "cpu"
 
@@ -107,16 +109,9 @@ def warn_gpu_task_failed(member_id: str) -> None:
     _warn_once(
         "gpu-task-failed",
         f"dd_docking: Vina-GPU+ docking failed for ensemble member {member_id!r} "
-        "(binary/driver/OpenCL kernel issue) -- falling back to CPU vina for this "
+        "(binary/driver/OpenCL kernel issue) -- falling back to CPU (QuickVina2) for this "
         "and any further failures this run.",
     )
-
-
-def _parse_affinity(pdbqt_text: str) -> Optional[float]:
-    for line in pdbqt_text.splitlines():
-        if line.startswith("REMARK VINA RESULT:"):
-            return float(line.split(":", 1)[1].split()[0])
-    return None
 
 
 def dock_ligand_gpu(
@@ -176,7 +171,7 @@ def dock_ligand_gpu(
             return None
         poses_pdbqt = out_path.read_text()
 
-    affinity = _parse_affinity(poses_pdbqt)
+    affinity = io.parse_vina_affinity(poses_pdbqt)
     if affinity is None:
         return None
     return affinity, poses_pdbqt

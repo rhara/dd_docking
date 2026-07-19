@@ -20,13 +20,16 @@ target or ligand set.
 
 ## Installation
 
-Requires vina, meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit,
-and mdtraj (now declared in `pyproject.toml`'s `dependencies`). These are
-best installed via conda-forge, using mamba:
+Requires meeko, pdbfixer, openmm, openmmforcefields, openff-toolkit, and
+mdtraj (declared in `pyproject.toml`'s `dependencies`), plus the `qvina2`
+CLI binary (from the conda-forge `qvina` package — CPU docking via
+QuickVina2, a speed-tuned AutoDock Vina 1.1.2 fork; not a Python import, so
+it can't be a `pyproject.toml` dependency). Best installed via conda-forge,
+using mamba:
 
 ```bash
 mamba create -n dd_docking python=3.12 -c conda-forge \
-    rdkit numpy pandas vina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
+    rdkit numpy pandas qvina meeko pdbfixer openmm openmmforcefields openff-toolkit mdtraj
 mamba activate dd_docking
 cd dd_docking
 pip install -e .
@@ -38,10 +41,10 @@ This installs three console commands: `dd_docking-prep`, `dd_docking-dock`,
 ### Optional: GPU-accelerated docking (Linux only)
 
 `dd_docking-dock` can use [Vina-GPU+](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.0)
-instead of CPU `vina` for a given docking task, when it's built and the
+instead of CPU QuickVina2 for a given docking task, when it's built and the
 task's box fits the OpenCL kernel's size limit. This is Linux-only; on
 macOS/Windows (or on Linux without the binary built), `dd_docking-dock`
-transparently uses CPU `vina` — no code changes needed, this is purely a
+transparently uses CPU QuickVina2 — no code changes needed, this is purely a
 runtime fallback (see `--backend` below).
 
 ```bash
@@ -210,7 +213,7 @@ Key options:
 | `--seed` | `0` | random seed (embedding and docking) |
 | `--top-n` | all | keep only the top N results |
 | `--n-jobs` | `1` | parallel workers, one per `(ligand, member)` task (`<=0` for all cores) |
-| `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member's box fits its <30 Å OpenCL kernel limit, else CPU `vina`; `cpu` always uses CPU `vina` (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)) |
+| `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member's box fits its <30 Å OpenCL kernel limit, else CPU QuickVina2; `cpu` always uses CPU QuickVina2 (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only)) |
 | `--no-progress` | - | suppress progress log |
 
 **`--n-jobs` behavior and CPU allocation**: `--n-jobs 1` (default) runs
@@ -319,9 +322,8 @@ df = run_ensemble_docking(
 
 - Rigid/flex PDBQT files for the 3 ensemble members in `data/ensemble/`
   (SARS-CoV-2 Mpro, PDB 6W63/7L11/7L10 — genuinely different pocket
-  conformations bound to different inhibitors) load without issue into
-  `vina.Vina().set_receptor(rigid, flex)`, and grid maps compute
-  successfully.
+  conformations bound to different inhibitors) dock without issue via
+  `qvina2 --receptor rigid.pdbqt --flex flex.pdbqt ...`.
 - Self-docking each member's co-crystallized ligand discriminates it from
   unrelated molecules (approved drugs) by affinity (see `data/ligands.smi`).
 - `receptor_prep.py`'s `regularize_carboxylate_geometry` fixes a PDBFixer
@@ -343,7 +345,7 @@ df = run_ensemble_docking(
 | `pocket.py` | docking box calculation, distance-based flexible-residue detection, Meeko flexres string formatting |
 | `ensemble.py` | batch receptor_prep + pocket + Meeko PDBQT generation across conformations; save/load as `manifest.json` |
 | `ligand_prep.py` | `.smi` reading, SMILES -> 3D (ETKDGv3+MMFF) -> Meeko ligand PDBQT |
-| `docking.py` | thin Vina wrapper with flexible-receptor support (`make_vina` / `dock_ligand`) |
+| `docking.py` | CPU docking via QuickVina2 (`qvina2` CLI), with flexible-receptor support (`dock_ligand`) |
 | `gpu_backend.py` | optional Vina-GPU+ backend (Linux only): backend selection (`resolve_backend`), subprocess docking (`dock_ligand_gpu`) |
 | `screening.py` | parallel all-ligand × all-member docking, best-of-ensemble ranking, CSV/SDF output |
 | `refine_md.py` | short implicit-solvent MD relaxation of top hits, RMSD stability evaluation, re-ranking |

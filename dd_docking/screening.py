@@ -58,11 +58,11 @@ def _dock_task(task) -> Tuple[str, str, Optional[float], Optional[str]]:
             gpu_backend.warn_gpu_task_failed(member.member_id)
 
     if result is None:
-        v = docking.make_vina(
-            member.rigid_pdbqt, member.center, member.size,
-            flex_pdbqt=member.flex_pdbqt, seed=seed, exhaustiveness=exhaustiveness, cpu=cpu,
+        result = docking.dock_ligand(
+            member.rigid_pdbqt, pdbqt, member.center, member.size,
+            flex_pdbqt=member.flex_pdbqt, seed=seed, exhaustiveness=exhaustiveness,
+            n_poses=n_poses, cpu=cpu,
         )
-        result = docking.dock_ligand(v, pdbqt, n_poses=n_poses)
 
     if result is None:
         return ligand_id, member.member_id, None, None

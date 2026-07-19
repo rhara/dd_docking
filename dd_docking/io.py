@@ -12,6 +12,17 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 
 
+def parse_vina_affinity(pdbqt: str) -> Optional[float]:
+    """Extract the best-mode affinity (kcal/mol) from a Vina-family (Vina,
+    QuickVina2, Vina-GPU+...) pose PDBQT's "REMARK VINA RESULT:" line.
+    Returns None if not found.
+    """
+    for line in pdbqt.splitlines():
+        if line.startswith("REMARK VINA RESULT:"):
+            return float(line.split(":", 1)[1].split()[0])
+    return None
+
+
 def pdbqt_string_to_mol(pdbqt: str):
     """Convert a Vina pose PDBQT string (first/best pose) to an RDKit Mol,
     including flexible side-chain atoms when present. Returns None on
