@@ -283,17 +283,22 @@ Key options:
 | `--backend` | `auto` | docking engine: `auto` uses Vina-GPU+ when built and the member has no flexible side chains and its box fits the <30 Å OpenCL kernel limit, else CPU QuickVina2; `cpu` always uses CPU QuickVina2 (every OS); `gpu` prefers Vina-GPU+ and falls back to `cpu` with a warning per member where it isn't usable (see [GPU-accelerated docking](#optional-gpu-accelerated-docking-linux-only-rigid-receptors-only)) |
 | `--no-progress` | - | suppress progress log |
 
-**`--n-jobs` behavior and CPU allocation**: `--n-jobs 1` (default) runs
-sequentially, giving each docking task all available cores internally
-(`cpu=0`). Any other `--n-jobs` value divides cores evenly across worker
-processes (`cpu_count // n_jobs`, minimum 1). Flexible side-chain docking is
-much heavier than rigid docking and benefits significantly from QuickVina2's
-own multithreading, so the common pattern for lightweight rigid docking — fix
-`--cpu 1` and parallelize jobs instead — backfires badly here. Measured on
-this repository's ER-alpha data (one ligand, one member, `--exhaustiveness
-16`, 16-core Linux box), single-task wall time by `--cpu`:
+**`--n-jobs` behavior and CPU allocation**: `--n-jobs` is the *only*
+CPU-allocation knob `dd_docking-dock`/`screen_ensemble` expose -- there is no
+separate `--cpu`/`--ncpu` flag on this CLI. Internally, `--n-jobs` controls
+how many cores each `(ligand, member)` task gets via qvina2's own `--cpu`
+flag (not user-facing here): `--n-jobs 1` (default) runs sequentially,
+letting each task use every available core (`cpu_count // 1`); any other
+`--n-jobs` value divides cores evenly across that many concurrent worker
+processes (`cpu_count // n_jobs`, minimum 1 core each). Flexible side-chain
+docking is much heavier than rigid docking and benefits significantly from
+QuickVina2's own multithreading, so the common pattern for lightweight rigid
+docking -- run every worker pinned to 1 core and parallelize jobs instead --
+backfires badly here. Measured on this repository's ER-alpha data (one
+ligand, one member, `--exhaustiveness 16`, 16-core Linux box), single-task
+wall time by cores-per-task:
 
-| `--cpu` | wall time | speedup vs. `--cpu 1` |
+| cores/task | wall time | speedup vs. 1 core |
 |---|---|---|
 | 1 | 827.5s | 1.0x |
 | 2 | 432.4s | 1.9x |
@@ -305,9 +310,9 @@ Returns diminish sharply past 8 cores (going from 8 to 16 cores only gains
 ~17%), so for a batch of many `(ligand, member)` tasks, splitting the extra
 cores across a couple of parallel `--n-jobs` workers (each still keeping
 several cores via `cpu_count // n_jobs`) tends to use the machine better than
-handing every core to one task at a time. Start conservatively (roughly `--cpu`
-4-8 per task, i.e. `--n-jobs` around `cpu_count // 6`) and adjust from there
-relative to library size and ensemble size.
+handing every core to one task at a time. Start conservatively (roughly 4-8
+cores per task, i.e. `--n-jobs` around `cpu_count // 6`) and adjust from
+there relative to library size and ensemble size.
 
 Python API:
 
