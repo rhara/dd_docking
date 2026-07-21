@@ -97,6 +97,18 @@ for small jobs. If your GPU/driver's OpenCL C compiler genuinely supports
 these patches are correctness fixes independent of that choice, so they're
 applied either way.
 
+**Planned: AutoDock-GPU for flexible receptors, Vina-GPU 2.1 for rigid
+screening.** Vina-GPU+ (2.0) is a dead end for the flexible-side-chain case
+that `dd_docking`'s ensemble docking actually needs (see the hard limitation
+above) -- GPU-accelerated flexible docking requires switching to
+[AutoDock-GPU](https://github.com/ccsb-scripps/AutoDock-GPU), which supports
+flexible receptor side chains natively. Separately, for rigid-receptor
+screening specifically (no flexible residues), 
+[Vina-GPU 2.1](https://github.com/DeltaGroupNJUPT/Vina-GPU-2.1) is reported
+to be substantially faster than the 2.0 line this project currently builds.
+Both integrations are planned but not yet implemented -- `--backend`
+currently only knows CPU QuickVina2 and Vina-GPU+ 2.0.
+
 ## Usage
 
 ### 1. Ensemble preparation (`dd_docking-prep`)
