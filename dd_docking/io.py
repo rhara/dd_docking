@@ -2,7 +2,8 @@
 
 Pose SDF properties use `affinity` for the docking score (matches one of
 `dd_viewer.scoring.SCORE_PROPERTY_CANDIDATES`, so results written here
-load directly into the companion protein-ligand viewer, `dd_viewer`).
+load directly into the companion protein-ligand viewer, `dd_molview`,
+which vendors the `dd_viewer` scoring module).
 """
 from __future__ import annotations
 

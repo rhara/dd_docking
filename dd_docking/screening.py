@@ -197,7 +197,7 @@ def write_results_csv(out_csv: str, hits: Sequence[EnsembleHit], *,
 
 
 def write_hits_sdf(out_sdf: str, hits: Sequence[EnsembleHit]) -> None:
-    """Write the best pose of each hit, tagged for the `dd_viewer` viewer
+    """Write the best pose of each hit, tagged for the `dd_molview` viewer
     (`affinity` property is one of its recognized score keys)."""
     records = []
     for rank, hit in enumerate(hits, start=1):
